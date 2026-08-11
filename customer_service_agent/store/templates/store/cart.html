@@ -1,0 +1,42 @@
+{% extends "store/base.html" %}
+{% block title %}Cart — Deskyard{% endblock %}
+{% block content %}
+<p class="eyebrow">Your cart</p>
+<h1 style="font-size:clamp(28px,4vw,40px); margin-bottom:32px;">Review &amp; Checkout</h1>
+
+{% if items %}
+  <div class="cart-list">
+    {% for item in items %}
+      <div class="cart-row" style="background:var(--panel); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius);">
+        <div class="thumb">
+          {% include "store/product_icon.html" with name=item.product.name %}
+        </div>
+        <div class="info">
+          <div class="name"><a href="{% url 'product_detail' item.product.pk %}">{{ item.product.name }}</a></div>
+          <div class="qty">Qty {{ item.quantity }} &times; ${{ item.product.price }}</div>
+        </div>
+        <div class="subtotal">${{ item.subtotal }}</div>
+        <form action="{% url 'remove_from_cart' item.product.pk %}" method="post" class="inline-form">
+          {% csrf_token %}
+          <button type="submit" class="secondary" style="padding:8px 14px; font-size:13px;">Remove</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="cart-summary" style="background:var(--panel); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius);">
+    <div class="total"><span>Total</span><span>${{ total }}</span></div>
+    <form action="{% url 'checkout' %}" method="post">
+      {% csrf_token %}
+      <button type="submit" id="checkout-btn" style="width:100%;">Proceed to Checkout</button>
+    </form>
+  </div>
+
+{% else %}
+  <div class="empty-state">
+    <h2>Your Cart is Empty</h2>
+    <p style="margin-bottom:24px;">Add some gear to get started.</p>
+    <a href="{% url 'product_list' %}" style="padding:12px 28px; background:var(--blueprint); color:#fff; border-radius:var(--radius); font-weight:600;">Browse the Shop →</a>
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "store/base.html" %}
+{% block title %}Log In — Deskyard{% endblock %}
+{% block content %}
+<div class="auth-card" style="background:var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius);">
+  <p class="eyebrow">Welcome back</p>
+  <h1 style="font-size:28px; margin-bottom:6px;">Log In</h1>
+  <p style="color:var(--ink-muted); font-size:14px; margin:0 0 24px;">Sign in to view your orders and chat with support.</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" id="login-btn" style="width:100%; margin-top:8px;">Log In</button>
+  </form>
+  <p style="margin-top:20px; font-size:14px; color:var(--ink-muted); text-align:center;">
+    No account? <a href="{% url 'register' %}" style="color:var(--blueprint);">Sign up for free</a>
+  </p>
+</div>
+{% endblock %}
