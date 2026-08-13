@@ -1,0 +1,60 @@
+{% extends "store/base.html" %}
+{% block title %}{{ product.name }} — Deskyard{% endblock %}
+{% block content %}
+<div class="product-page">
+  <div>
+    <div class="product-visual{% if product.image %} has-photo{% endif %}">
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+      {% if product.image %}
+        <img src="{{ product.image.url }}" alt="{{ product.name }}">
+      {% else %}
+        {% include "store/product_icon.html" with name=product.name %}
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <p class="eyebrow">SKU-{{ product.pk|stringformat:"04d" }}</p>
+    <h1 style="font-size:clamp(28px,4vw,40px); margin-bottom:12px;">{{ product.name }}</h1>
+    <p class="hero-sub" style="margin-bottom:24px;">{{ product.description }}</p>
+
+    <ul class="spec-list">
+      <li>
+        <span>Price</span>
+        <span>${{ product.price }}</span>
+      </li>
+      <li>
+        <span>Availability</span>
+        <span>
+          {% if product.stock > 0 %}
+            <span class="badge in-stock">{{ product.stock }} in stock</span>
+          {% else %}
+            <span class="badge out-stock">Sold out</span>
+          {% endif %}
+        </span>
+      </li>
+      <li>
+        <span>SKU</span>
+        <span>SKU-{{ product.pk|stringformat:"04d" }}</span>
+      </li>
+    </ul>
+
+    {% if product.stock > 0 %}
+      <form action="{% url 'add_to_cart' product.pk %}" method="post" id="add-to-cart-form">
+        {% csrf_token %}
+        <div class="qty-row">
+          <label for="quantity">Quantity</label>
+          <input type="number" id="quantity" name="quantity" value="1" min="1" max="{{ product.stock }}">
+        </div>
+        <button type="submit" id="add-to-cart-btn">Add to Cart</button>
+        <p id="add-to-cart-status" class="cart-status" aria-live="polite"></p>
+      </form>
+    {% else %}
+      <button type="button" disabled>Sold Out</button>
+    {% endif %}
+
+    <a href="{% url 'product_list' %}" class="back-link">← Back to Shop</a>
+  </div>
+</div>
+{% endblock %}

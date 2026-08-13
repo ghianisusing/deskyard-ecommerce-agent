@@ -1,0 +1,164 @@
+{% comment %}
+Inline SVG wireframe icons for Deskyard products.
+Usage: {% include "store/product_icon.html" with name=product.name %}
+Falls back to a generic tech monogram if the product name isn't matched.
+{% endcomment %}
+{% if "Mouse" in name or "mouse" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- mouse body -->
+  <path d="M22 28 C22 16 42 16 42 28 L42 46 C42 54 22 54 22 46 Z"/>
+  <!-- center divider line -->
+  <line x1="32" y1="16" x2="32" y2="38"/>
+  <!-- scroll wheel -->
+  <rect x="29" y="24" width="6" height="10" rx="3"/>
+  <!-- left click detail -->
+  <path d="M22 28 C22 22 29 18 29 18" stroke-linecap="round"/>
+</svg>
+{% elif "Keyboard" in name or "keyboard" in name %}
+<svg viewBox="0 0 80 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- body -->
+  <rect x="4" y="4" width="72" height="40" rx="5"/>
+  <!-- row 1 keys -->
+  <rect x="10" y="11" width="7" height="5" rx="1.5"/>
+  <rect x="20" y="11" width="7" height="5" rx="1.5"/>
+  <rect x="30" y="11" width="7" height="5" rx="1.5"/>
+  <rect x="40" y="11" width="7" height="5" rx="1.5"/>
+  <rect x="50" y="11" width="7" height="5" rx="1.5"/>
+  <rect x="60" y="11" width="10" height="5" rx="1.5"/>
+  <!-- row 2 keys -->
+  <rect x="10" y="19" width="10" height="5" rx="1.5"/>
+  <rect x="23" y="19" width="7" height="5" rx="1.5"/>
+  <rect x="33" y="19" width="7" height="5" rx="1.5"/>
+  <rect x="43" y="19" width="7" height="5" rx="1.5"/>
+  <rect x="53" y="19" width="7" height="5" rx="1.5"/>
+  <!-- row 3 keys -->
+  <rect x="10" y="27" width="12" height="5" rx="1.5"/>
+  <rect x="25" y="27" width="7" height="5" rx="1.5"/>
+  <rect x="35" y="27" width="7" height="5" rx="1.5"/>
+  <rect x="45" y="27" width="7" height="5" rx="1.5"/>
+  <!-- spacebar -->
+  <rect x="20" y="35" width="40" height="5" rx="2"/>
+</svg>
+{% elif "Hub" in name or "hub" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- body -->
+  <rect x="8" y="20" width="48" height="24" rx="5"/>
+  <!-- ports top row -->
+  <rect x="14" y="27" width="6" height="10" rx="2"/>
+  <rect x="23" y="27" width="6" height="10" rx="2"/>
+  <rect x="32" y="27" width="6" height="10" rx="2"/>
+  <!-- HDMI port shape -->
+  <path d="M41 27 L47 27 L48 32 L47 37 L41 37 L40 32 Z"/>
+  <!-- LED indicator -->
+  <circle cx="53" cy="32" r="2"/>
+  <!-- cable -->
+  <path d="M56 32 C60 32 62 28 62 24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+{% elif "Stand" in name or "stand" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- laptop platform top -->
+  <rect x="10" y="14" width="44" height="6" rx="2"/>
+  <!-- left support -->
+  <line x1="16" y1="20" x2="10" y2="50"/>
+  <!-- right support -->
+  <line x1="48" y1="20" x2="54" y2="50"/>
+  <!-- base beam -->
+  <line x1="8" y1="50" x2="56" y2="50"/>
+  <!-- adjustment notch detail -->
+  <circle cx="32" cy="35" r="3"/>
+  <line x1="32" y1="20" x2="32" y2="32"/>
+</svg>
+{% elif "Webcam" in name or "webcam" in name or "Camera" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- body -->
+  <rect x="14" y="14" width="36" height="26" rx="6"/>
+  <!-- lens outer -->
+  <circle cx="32" cy="27" r="9"/>
+  <!-- lens inner -->
+  <circle cx="32" cy="27" r="5"/>
+  <!-- lens glint -->
+  <circle cx="35" cy="24" r="1.5"/>
+  <!-- mount clip -->
+  <rect x="26" y="40" width="12" height="6" rx="2"/>
+  <!-- mount base -->
+  <path d="M22 46 C22 50 42 50 42 46"/>
+</svg>
+{% elif "Desk Converter" in name or "desk converter" in name %}
+<svg viewBox="0 0 80 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- base plate -->
+  <rect x="6" y="50" width="68" height="5" rx="2"/>
+  <!-- work surface top platform -->
+  <rect x="10" y="18" width="60" height="5" rx="2"/>
+  <!-- left column -->
+  <path d="M16 55 L16 23"/>
+  <!-- right column -->
+  <path d="M64 55 L64 23"/>
+  <!-- keyboard tray -->
+  <rect x="14" y="36" width="52" height="4" rx="2"/>
+  <!-- monitor placeholder on top -->
+  <rect x="24" y="8" width="32" height="10" rx="2"/>
+  <!-- monitor stand detail -->
+  <line x1="40" y1="18" x2="40" y2="23"/>
+</svg>
+{% elif "Monitor Arm" in name or "monitor arm" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- clamp base -->
+  <rect x="6" y="48" width="10" height="12" rx="2"/>
+  <!-- vertical pole -->
+  <rect x="9" y="18" width="4" height="30"/>
+  <!-- horizontal arm -->
+  <rect x="13" y="18" width="26" height="3" rx="1.5"/>
+  <!-- joint circle -->
+  <circle cx="39" cy="19.5" r="4"/>
+  <!-- angled arm -->
+  <path d="M43 19 L52 26" stroke-linecap="round"/>
+  <!-- monitor bracket -->
+  <rect x="48" y="20" width="10" height="14" rx="2"/>
+</svg>
+{% elif "Lamp" in name or "lamp" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- base -->
+  <ellipse cx="32" cy="56" rx="18" ry="4"/>
+  <!-- stem -->
+  <line x1="32" y1="52" x2="32" y2="32"/>
+  <!-- arm bend -->
+  <path d="M32 32 C32 24 24 20 24 12" stroke-linecap="round"/>
+  <!-- lamp head -->
+  <path d="M14 12 L34 12 L30 22 L18 22 Z"/>
+  <!-- light rays -->
+  <line x1="24" y1="22" x2="20" y2="30"/>
+  <line x1="27" y1="22" x2="27" y2="31"/>
+  <line x1="30" y1="22" x2="34" y2="30"/>
+</svg>
+{% elif "Headphone" in name or "headphone" in name %}
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- headband arc -->
+  <path d="M12 36 C12 18 52 18 52 36"/>
+  <!-- left ear cup -->
+  <rect x="6" y="34" width="14" height="16" rx="5"/>
+  <!-- right ear cup -->
+  <rect x="44" y="34" width="14" height="16" rx="5"/>
+  <!-- cushion detail left -->
+  <rect x="9" y="37" width="8" height="10" rx="3"/>
+  <!-- cushion detail right -->
+  <rect x="47" y="37" width="8" height="10" rx="3"/>
+</svg>
+{% elif "Cable" in name or "cable" in name or "Tray" in name or "tray" in name %}
+<svg viewBox="0 0 80 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- tray body -->
+  <rect x="6" y="10" width="68" height="20" rx="3"/>
+  <!-- mount slots -->
+  <rect x="12" y="16" width="8" height="8" rx="2"/>
+  <rect x="36" y="16" width="8" height="8" rx="2"/>
+  <rect x="60" y="16" width="8" height="8" rx="2"/>
+  <!-- cable wiggles -->
+  <path d="M20 20 C26 14 30 26 36 20" stroke-linecap="round"/>
+  <path d="M44 20 C50 14 54 26 60 20" stroke-linecap="round"/>
+  <!-- mount bracket left -->
+  <path d="M6 12 L2 12 L2 28 L6 28"/>
+  <!-- mount bracket right -->
+  <path d="M74 12 L78 12 L78 28 L74 28"/>
+</svg>
+{% else %}
+<span class="monogram">{{ name|first }}</span>
+{% endif %}
