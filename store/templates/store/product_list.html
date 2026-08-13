@@ -1,0 +1,83 @@
+{% extends "store/base.html" %}
+{% block title %}Deskyard — Shop{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">Home office gear</p>
+  <h1>Build a desk you don't want to leave.</h1>
+  <p class="hero-sub">Considered gear for the setup you actually use every day — picked for how it feels, not just how it photographs.</p>
+</section>
+
+<div id="product-results">
+  <form class="filter-bar" method="get">
+    <input
+      type="text"
+      name="q"
+      value="{{ query }}"
+      placeholder="Search products…"
+      class="search-input"
+      aria-label="Search products"
+    >
+    <button type="submit">Search</button>
+    {% if query or selected_category %}
+      <a href="{% url 'product_list' %}" class="clear-filters">Clear</a>
+    {% endif %}
+  </form>
+
+  <div class="category-chips">
+    <a href="{% url 'product_list' %}{% if query %}?q={{ query|urlencode }}{% endif %}"
+       class="chip {% if not selected_category %}active{% endif %}">All</a>
+    {% for value, label in categories %}
+      <a href="?category={{ value }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         class="chip {% if selected_category == value %}active{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <div class="grid">
+    {% for product in products %}
+      <a href="{% url 'product_detail' product.pk %}" class="product-card" style="text-decoration:none; color:inherit;">
+        <div class="product-visual{% if product.image %} has-photo{% endif %}">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          {% if product.image %}
+            <img src="{{ product.image.url }}" alt="{{ product.name }}">
+          {% else %}
+            {% include "store/product_icon.html" with name=product.name %}
+          {% endif %}
+        </div>
+        <div class="product-info">
+          <h3>{{ product.name }}</h3>
+          <p class="sku">SKU-{{ product.pk|stringformat:"04d" }}</p>
+          <div class="product-footer">
+            <span class="price-tag">${{ product.price }}</span>
+            {% if product.stock > 0 %}
+              <span class="badge in-stock">In stock</span>
+            {% else %}
+              <span class="badge out-stock">Sold out</span>
+            {% endif %}
+          </div>
+        </div>
+      </a>
+    {% empty %}
+      <p style="color: var(--ink-muted);">
+        {% if query or selected_category %}
+          No products match your filters.
+        {% else %}
+          No products yet.
+        {% endif %}
+      </p>
+    {% endfor %}
+  </div>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="pagination" aria-label="Product pages">
+      {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">← Prev</a>
+      {% endif %}
+      <span class="page-status">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Next →</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+</div>
+{% endblock %}
