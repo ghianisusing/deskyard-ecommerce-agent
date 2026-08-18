@@ -3,7 +3,7 @@ import os
 
 from django.conf import settings
 from django.core.cache import cache
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from openai import OpenAI
 
@@ -13,6 +13,7 @@ from .knowledge_base import format_knowledge_base
 from .models import ChatLog
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+MAX_TTS_CHARS = 2000
 
 
 def build_product_context() -> str:
@@ -178,3 +179,55 @@ def chat_api(request):
     _log_chat(request, user_message, reply=reply_text, escalated=escalate)
 
     return JsonResponse({"reply": reply_text, "escalate": escalate})
+
+
+@csrf_exempt
+def tts_api(request):
+    """Text -> natural-sounding speech (MP3 bytes) via OpenAI's TTS API,
+    used by the browser voice call feature for Deskie's spoken replies.
+
+    Reuses the same rate limiter as chat_api. Since every voice-call turn
+    calls this once per chat_api call, that halves the effective number of
+    conversational turns available within the rate-limit window compared
+    to text chat — an intentional tradeoff: without sharing the limiter, a
+    client could hit this endpoint directly in a loop with arbitrary text
+    at real per-character API cost, with nothing else gating it.
+
+    If this fails for any reason (missing key, quota, network), the
+    frontend falls back to the browser's own built-in speech synthesis —
+    a voice call should never go silent just because this endpoint had a
+    bad moment.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    if _is_rate_limited(request):
+        return JsonResponse({"error": "Too many requests."}, status=429)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JsonResponse({"error": "Empty text"}, status=400)
+    # Defense in depth: normal callers only ever send a chat reply, which
+    # is already bounded by chat_api's max_tokens, but this endpoint could
+    # in principle be called directly with arbitrary input.
+    text = text[:MAX_TTS_CHARS]
+
+    if not settings.OPENAI_API_KEY:
+        return JsonResponse({"error": "Server is missing OPENAI_API_KEY."}, status=500)
+
+    try:
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        speech = client.audio.speech.create(
+            model=settings.OPENAI_TTS_MODEL,
+            voice=settings.OPENAI_TTS_VOICE,
+            input=text,
+        )
+    except Exception as exc:  # noqa: BLE001 - never crash; frontend falls back to browser TTS
+        return JsonResponse({"error": f"TTS error: {exc}"}, status=502)
+
+    return HttpResponse(speech.content, content_type="audio/mpeg")

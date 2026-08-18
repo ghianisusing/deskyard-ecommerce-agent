@@ -27,6 +27,13 @@ ALLOWED_HOSTS = ["*"]
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
+# Used by the browser voice call feature (agent/views.py:tts_api) for
+# natural-sounding spoken replies. "nova" is a warm, friendly-sounding
+# voice — see https://platform.openai.com/docs/guides/text-to-speech for
+# the full list if you want to try a different one.
+OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1")
+OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "nova")
+
 INSTALLED_APPS = [
     'django.contrib.sessions',
     "django.contrib.admin",

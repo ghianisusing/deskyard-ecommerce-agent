@@ -1,13 +1,36 @@
 <div id="chat-widget">
-  <button id="chat-toggle" aria-label="Open support chat" aria-expanded="false">Support</button>
+  <button id="chat-toggle" aria-label="Open support chat" aria-expanded="false">
+    {% include "agent/face.html" with size="sm" %}
+    <span class="chat-toggle-label">Ask Deskie</span>
+  </button>
   <div id="chat-panel" class="chat-card hidden" role="dialog" aria-label="Customer support chat">
     <div class="chat-header">
+      <div class="chat-header-identity">
+        {% include "agent/face.html" with size="xs" %}
+        <span class="chat-header-name">Deskie</span>
+      </div>
+      <button id="voice-toggle" type="button" aria-pressed="false" aria-label="Start a voice call with Deskie">📞 Call</button>
       <button id="chat-close" aria-label="Close chat">&times;</button>
+    </div>
+    <div id="voice-status" class="voice-status hidden" aria-live="polite">
+      <span id="voice-status-text">🎙️ Listening…</span>
     </div>
     <div id="messages" class="chat-messages" aria-live="polite"></div>
     <form id="chat-form" class="chat-input-row">
       <input id="chat-input" type="text" placeholder="Ask a question…" autocomplete="off" aria-label="Chat message" />
       <button type="submit">Send</button>
     </form>
+  </div>
+</div>
+
+<!-- Deskie moves out here, separate from the chat panel, while a voice
+     call is active — the chat panel hides itself and this becomes the
+     visible assistant until the call ends. -->
+<div id="deskie-floating" class="deskie-floating hidden" role="status" aria-live="polite">
+  {% include "agent/face.html" with size="lg" %}
+  <p id="deskie-floating-status">🎙️ Listening…</p>
+  <div class="deskie-floating-actions">
+    <button id="deskie-floating-transcript" type="button">💬 View chat</button>
+    <button id="deskie-floating-end" type="button">End Call</button>
   </div>
 </div>

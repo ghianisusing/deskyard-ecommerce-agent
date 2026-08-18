@@ -1,0 +1,30 @@
+{% comment %}
+Deskie — the AI agent's mascot. A CSS-animated state machine, not a static
+image: chat.js toggles the data-state attribute (idle/listening/thinking/
+happy/concerned) and chat.css handles all the animation from there. No
+external assets, no animation library — same hand-drawn-line-art spirit
+as the product wireframe icons elsewhere in the app.
+
+Usage: {% include "agent/face.html" with size="sm" %}
+size: "xs" (chat header) or "sm" (toggle button). Defaults to "sm".
+{% endcomment %}
+<svg class="deskie deskie--{{ size|default:"sm" }}" data-state="idle" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <g class="deskie-body-group">
+    <path class="deskie-antenna-stalk" d="M32 14 L32 4" stroke="var(--blueprint, #3b82f6)" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <circle class="deskie-antenna-tip" cx="32" cy="4" r="3.4" fill="var(--blueprint, #3b82f6)"/>
+    <path class="deskie-body" d="M32 14 C46 14 55 25 55 39 C55 53 45 61 32 61 C19 61 9 53 9 39 C9 25 18 14 32 14 Z" fill="var(--mint, #00C853)"/>
+    <g class="deskie-eyes">
+      <ellipse class="deskie-eye" cx="24" cy="35" rx="5" ry="6.5" fill="#0d1321"/>
+      <ellipse class="deskie-eye" cx="39" cy="36" rx="4.2" ry="5.6" fill="#0d1321"/>
+      <circle class="deskie-eye-highlight" cx="22.4" cy="32" r="1.3" fill="#fff"/>
+      <circle class="deskie-eye-highlight" cx="37.6" cy="33.2" r="1.1" fill="#fff"/>
+    </g>
+    <g class="deskie-mouth">
+      <path class="mouth-idle" d="M26 47 Q32 50 38 47" stroke="#0d1321" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+      <path class="mouth-happy" d="M24 46 Q32 55 40 46" stroke="#0d1321" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <path class="mouth-thinking" d="M27 48 Q32 46 37 48" stroke="#0d1321" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+      <path class="mouth-concerned" d="M26 49 Q32 46 38 49" stroke="#0d1321" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+      <ellipse class="mouth-speaking" cx="32" cy="47" rx="5" ry="3" fill="#0d1321"/>
+    </g>
+  </g>
+</svg>

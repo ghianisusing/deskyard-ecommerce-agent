@@ -6,6 +6,8 @@
   font-family: var(--font-body, -apple-system, sans-serif);
 }
 
+#chat-toggle.hidden { display: none; }
+
 #chat-toggle {
   padding: 14px 24px;
   border: none;
@@ -22,19 +24,13 @@
   gap: 8px;
 }
 
-#chat-toggle::before {
-  content: "";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--mint, #10b981);
-  box-shadow: 0 0 8px var(--mint);
-}
-
 #chat-toggle:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(59, 130, 246, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.chat-toggle-label {
+  white-space: nowrap;
 }
 
 .chat-card {
@@ -81,13 +77,58 @@
   align-items: center;
 }
 
-.chat-header::before {
-  content: "// SUPPORT";
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--blueprint);
+.chat-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-right: auto;
 }
+
+.chat-header-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--blueprint, #3b82f6);
+}
+
+#voice-toggle {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+#voice-toggle:hover {
+  border-color: var(--blueprint, #3b82f6);
+  color: #fff;
+}
+#voice-toggle[aria-pressed="true"] {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+#voice-toggle:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.voice-status {
+  padding: 8px 16px;
+  background: rgba(59, 130, 246, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--blueprint, #3b82f6);
+  text-align: center;
+}
+.voice-status.hidden { display: none; }
 
 #chat-close {
   background: none;
@@ -167,6 +208,27 @@
   max-width: 95%;
 }
 
+/* Agent replies get a Deskie avatar riding alongside the bubble, so the
+   expression change on a new reply is something you actually see in the
+   transcript, not just a small icon in the header. */
+.msg-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 92%;
+  animation: messageFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.msg-row .deskie--msg {
+  margin-bottom: 2px; /* nudge to align with the bubble's baseline */
+}
+
+.msg-row .msg.agent {
+  align-self: auto; /* let the row's align-items control vertical position */
+  animation: none;  /* the row itself already animates in; avoid double-fade */
+}
+
 .chat-input-row {
   display: flex;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -209,3 +271,228 @@
   background: var(--blueprint-dark);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
+
+/* ============================================================
+   DESKIE — the AI agent's mascot
+   ============================================================
+   A small alien-blob SVG (agent/templates/agent/face.html) whose
+   data-state attribute drives everything below. chat.js is the only
+   thing that ever changes data-state; this file owns every visual
+   consequence of that change. Two sizes are used: xs (chat header)
+   and sm (floating toggle button).
+   ============================================================ */
+
+.deskie {
+  display: block;
+  flex-shrink: 0;
+  overflow: visible; /* drop-shadow glow on the antenna tip needs room */
+}
+
+.deskie--xs { width: 28px; height: 28px; }
+.deskie--sm { width: 34px; height: 34px; }
+.deskie--msg { width: 30px; height: 30px; }
+.deskie--lg { width: 110px; height: 110px; }
+
+.deskie-body-group {
+  transform-origin: 32px 38px; /* roughly the blob's center */
+}
+
+/* --- Idle: default resting state, always running underneath whatever
+   state-specific animation is layered on top --- */
+@keyframes deskie-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2.5px); }
+}
+.deskie[data-state="idle"] .deskie-body-group,
+.deskie[data-state="listening"] .deskie-body-group {
+  animation: deskie-bob 3s ease-in-out infinite;
+}
+
+@keyframes deskie-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95%           { transform: scaleY(0.12); }
+}
+.deskie-eyes {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: deskie-blink 4.5s ease-in-out infinite;
+}
+
+@keyframes deskie-antenna-glow {
+  0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 0px var(--blueprint, #3b82f6)); }
+  50%      { opacity: 1;   filter: drop-shadow(0 0 4px var(--blueprint, #3b82f6)); }
+}
+.deskie-antenna-tip {
+  animation: deskie-antenna-glow 2.5s ease-in-out infinite;
+}
+
+.deskie-mouth path,
+.deskie-mouth ellipse { display: none; }
+.deskie-mouth .mouth-idle { display: block; }
+
+/* --- Listening: input is focused — a small attentive lean --- */
+.deskie[data-state="listening"] .deskie-eyes {
+  transform: translateX(1.5px);
+}
+
+/* --- Thinking: waiting on the OpenAI response --- */
+@keyframes deskie-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25%      { transform: rotate(-4deg); }
+  75%      { transform: rotate(4deg); }
+}
+.deskie[data-state="thinking"] .deskie-body-group {
+  animation: deskie-wobble 0.9s ease-in-out infinite;
+}
+
+@keyframes deskie-antenna-glow-fast {
+  0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 0px var(--blueprint, #3b82f6)); }
+  50%      { opacity: 1;   filter: drop-shadow(0 0 6px var(--blueprint, #3b82f6)); }
+}
+.deskie[data-state="thinking"] .deskie-antenna-tip {
+  animation: deskie-antenna-glow-fast 0.6s ease-in-out infinite;
+}
+.deskie[data-state="thinking"] .deskie-eyes {
+  animation: none;
+  transform: scaleY(0.65);
+}
+.deskie[data-state="thinking"] .mouth-idle { display: none; }
+.deskie[data-state="thinking"] .mouth-thinking { display: block; }
+
+/* --- Happy: a reply just landed — one quick bounce, then it settles
+   back into idle on its own since this animation only runs once --- */
+@keyframes deskie-bounce-happy {
+  0%   { transform: scale(1, 1); }
+  30%  { transform: scale(1.15, 0.85); }
+  55%  { transform: scale(0.92, 1.12); }
+  100% { transform: scale(1, 1); }
+}
+.deskie[data-state="happy"] .deskie-body-group {
+  animation: deskie-bounce-happy 0.5s ease-out 1;
+}
+.deskie[data-state="happy"] .mouth-idle { display: none; }
+.deskie[data-state="happy"] .mouth-happy { display: block; }
+
+/* --- Speaking: browser TTS is reading a reply aloud (voice call mode).
+   Loops for as long as speech synthesis is actually playing — chat.js
+   holds this state until the utterance's 'end' event fires, unlike
+   happy/concerned which auto-reset after a fixed timer. --- */
+@keyframes deskie-talk {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.deskie[data-state="speaking"] .deskie-body-group {
+  animation: deskie-bob 3s ease-in-out infinite;
+}
+.deskie[data-state="speaking"] .deskie-antenna-tip {
+  animation: deskie-antenna-glow-fast 0.7s ease-in-out infinite;
+}
+.deskie[data-state="speaking"] .mouth-idle { display: none; }
+.deskie[data-state="speaking"] .mouth-speaking {
+  display: block;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: deskie-talk 0.32s ease-in-out infinite;
+}
+
+/* --- Concerned: error or escalation — antenna droops, everything dims
+   slightly. No loop; it just holds this pose until the next state. --- */
+.deskie[data-state="concerned"] .deskie-antenna-stalk,
+.deskie[data-state="concerned"] .deskie-antenna-tip {
+  transform-origin: 32px 14px;
+  transform: rotate(22deg);
+  opacity: 0.65;
+}
+.deskie[data-state="concerned"] .deskie-antenna-tip {
+  animation: none;
+}
+.deskie[data-state="concerned"] .deskie-body {
+  opacity: 0.85;
+}
+.deskie[data-state="concerned"] .deskie-eyes {
+  animation: none;
+  transform: scaleY(0.8);
+}
+.deskie[data-state="concerned"] .mouth-idle { display: none; }
+.deskie[data-state="concerned"] .mouth-concerned { display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .deskie * {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   FLOATING CALL ASSISTANT
+   Deskie moves out here, separate from the chat panel, for the
+   duration of a voice call. Same widget corner as the chat toggle so
+   it doesn't relocate the "assistant is here" anchor point, just makes
+   it bigger and call-focused instead of a small icon.
+   ============================================================ */
+.deskie-floating {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1001; /* above #chat-widget in case both are ever visible */
+  cursor: grab;
+  touch-action: none; /* let pointer events drive dragging on touch, not native scroll gestures */
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 26px 30px;
+  background: rgba(9, 13, 22, 0.94);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 22px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  animation: floatingIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.deskie-floating.hidden { display: none; }
+.deskie-floating.dragging { cursor: grabbing; }
+.deskie-floating button { cursor: pointer; }
+
+@keyframes floatingIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+#deskie-floating-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--blueprint, #3b82f6);
+  margin: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.deskie-floating-actions {
+  display: flex;
+  gap: 8px;
+}
+.deskie-floating-actions button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+#deskie-floating-transcript:hover {
+  border-color: var(--blueprint, #3b82f6);
+  color: #fff;
+}
+#deskie-floating-end {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+#deskie-floating-end:hover { background: rgba(239, 68, 68, 0.28); }

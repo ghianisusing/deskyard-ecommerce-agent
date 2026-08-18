@@ -79,6 +79,51 @@ by hand.
   `agent/signals.py` fires a real notification (email and/or Slack) to
   whoever's configured to receive them — see "Escalation notifications"
   below.
+- **Deskie** — the agent has a small hand-drawn SVG mascot
+  (`agent/templates/agent/face.html`) with CSS-animated expressions
+  (idle, listening, thinking, happy, concerned, speaking) driven by a
+  `data-state` attribute that `chat.js` toggles at each point in the
+  conversation. Each agent reply in the transcript gets its own frozen
+  snapshot avatar (cloned from the live one, not duplicated markup).
+- **Voice call mode** — click "📞 Call" in the widget header to talk to
+  Deskie instead of typing.
+  - **Your voice → text**: the browser's built-in Web Speech API
+    (`SpeechRecognition`) — no external service, no cost.
+  - **Deskie's voice**: OpenAI's TTS API (`agent/views.py:tts_api`), a
+    real neural voice ("nova" by default — natural and friendly-sounding,
+    not the robotic default browser voice), reusing the same
+    `OPENAI_API_KEY` the chat agent already uses. If that request fails
+    for any reason (quota, network, missing key), the frontend
+    automatically falls back to the browser's own `SpeechSynthesis`
+    rather than going silent.
+  - **Animation sync**: while Deskie speaks, her mouth movement is driven
+    by the *actual* audio waveform in real time via the Web Audio API's
+    `AnalyserNode` — genuine amplitude-based sync, not a fixed-timing
+    loop. Falls back to a CSS keyframe loop if Web Audio setup fails.
+  - **Floating assistant**: during an active call, Deskie moves out of
+    the chat panel into a separate floating element
+    (`#deskie-floating`) — the panel and its small toggle button hide
+    themselves, and this bigger assistant (with its own status text and
+    "End Call" button) becomes the visible UI. A "💬 View chat" button
+    lets you peek at the text transcript mid-call without hanging up.
+  - Both the mic input and Deskie's replies go through the exact same
+    `/api/chat/` endpoint as typed messages, so escalation and the
+    knowledge base behave identically either way.
+  - **Browser support varies** for the mic side: solid in Chrome/Edge,
+    weak-to-absent in Firefox/Safari — the call button disables itself
+    with an explanatory tooltip when unsupported, rather than failing
+    silently.
+  - This is a browser-side voice *chat*, not a real phone call —
+    "transfer to a human" still means the existing email/Slack
+    escalation notification, not a live person joining the call. A real
+    phone number would need a telephony provider (e.g. Twilio) and a
+    paid account, which is a separate, much larger integration.
+  - **Cost note**: `/api/tts/` shares the same per-user rate limiter as
+    `/api/chat/` (`CHAT_RATE_LIMIT_MAX`/`WINDOW`), since every voice
+    turn calls both once — this halves the effective number of
+    conversational turns available in the rate-limit window compared to
+    text chat, which is intentional (otherwise TTS could be hit directly
+    at unbounded per-character API cost with nothing gating it).
 
 ## Design
 
@@ -156,9 +201,11 @@ partially apply on failure), a concurrency test proving two simultaneous
 checkouts can't both claim the last unit of stock, order total
 calculation, escalation tag parsing, escalation email/Slack notifications
 actually firing (and failing silently if misconfigured), chat rate
-limiting, product search/category filtering/pagination, and product image
+limiting, product search/category filtering/pagination, product image
 rendering (falls back to the SVG icon when unset, renders the real image
-when uploaded).
+when uploaded), Deskie/voice-call/floating-assistant markup rendering,
+and the TTS endpoint (success, error handling, text length capping, and
+that its rate limit is genuinely shared with the chat endpoint).
 
 ## Next steps
 

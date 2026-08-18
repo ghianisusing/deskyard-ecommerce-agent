@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.cache import cache
@@ -190,3 +191,164 @@ class EscalationSlackNotificationTests(TestCase):
                 ChatLog.objects.create(message="help", reply="on it", escalated=True)
             except RuntimeError:
                 self.fail("Slack failure in the signal handler must not propagate")
+
+
+class DeskieWidgetRenderingTests(TestCase):
+    """The chat widget (and Deskie's avatar inside it) is included on every
+    page via store/templates/store/base.html — checking the store's
+    homepage is enough to confirm it actually renders."""
+
+    def test_deskie_avatar_renders_on_the_homepage(self):
+        response = self.client.get(reverse("product_list"))
+        self.assertContains(response, 'class="deskie deskie--sm"')
+        self.assertContains(response, 'class="deskie deskie--xs"')
+        self.assertContains(response, "Ask Deskie")
+        self.assertContains(response, "Deskie</span>")
+
+    def test_both_deskie_copies_start_in_idle_state(self):
+        # Three Deskie copies now render server-side: the toggle button,
+        # the chat header, and the floating call assistant.
+        response = self.client.get(reverse("product_list"))
+        self.assertContains(response, 'data-state="idle"', count=3)
+
+    def test_voice_call_toggle_renders(self):
+        response = self.client.get(reverse("product_list"))
+        self.assertContains(response, 'id="voice-toggle"')
+        self.assertContains(response, 'id="voice-status"')
+        self.assertContains(response, 'aria-pressed="false"')
+
+    def test_floating_call_assistant_renders(self):
+        response = self.client.get(reverse("product_list"))
+        self.assertContains(response, 'id="deskie-floating"')
+        self.assertContains(response, 'class="deskie deskie--lg"')
+        self.assertContains(response, 'id="deskie-floating-end"')
+        self.assertContains(response, 'id="deskie-floating-transcript"')
+
+
+@override_settings(OPENAI_API_KEY="test-key")
+class TtsApiTests(TestCase):
+    """The voice call feature's spoken-reply endpoint. Mocks the OpenAI
+    audio.speech.create call the same way ChatApiRateLimitTests mocks
+    chat.completions.create, so no real API calls happen in tests."""
+
+    def setUp(self):
+        cache.clear()
+
+    @patch("agent.views.OpenAI")
+    def test_returns_audio_bytes_on_success(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_speech = MagicMock()
+        mock_speech.content = b"\xff\xfbfake-mp3-bytes"
+        mock_client.audio.speech.create.return_value = mock_speech
+        mock_openai_cls.return_value = mock_client
+
+        response = self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": "Hello there!"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "audio/mpeg")
+        self.assertEqual(response.content, b"\xff\xfbfake-mp3-bytes")
+
+    @patch("agent.views.OpenAI")
+    def test_uses_configured_model_and_voice(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_speech = MagicMock()
+        mock_speech.content = b"audio"
+        mock_client.audio.speech.create.return_value = mock_speech
+        mock_openai_cls.return_value = mock_client
+
+        self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": "hi"}),
+            content_type="application/json",
+        )
+
+        _, kwargs = mock_client.audio.speech.create.call_args
+        self.assertEqual(kwargs["model"], settings.OPENAI_TTS_MODEL)
+        self.assertEqual(kwargs["voice"], settings.OPENAI_TTS_VOICE)
+        self.assertEqual(kwargs["input"], "hi")
+
+    def test_empty_text_is_rejected(self):
+        response = self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": ""}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_invalid_json_is_rejected(self):
+        response = self.client.post(
+            reverse("tts_api"), data="not json", content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_get_is_rejected(self):
+        response = self.client.get(reverse("tts_api"))
+        self.assertEqual(response.status_code, 405)
+
+    @patch("agent.views.OpenAI")
+    def test_overlong_text_is_truncated_not_rejected(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_speech = MagicMock()
+        mock_speech.content = b"audio"
+        mock_client.audio.speech.create.return_value = mock_speech
+        mock_openai_cls.return_value = mock_client
+
+        long_text = "a" * 5000
+        response = self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": long_text}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        _, kwargs = mock_client.audio.speech.create.call_args
+        self.assertLessEqual(len(kwargs["input"]), 2000)
+
+    @patch("agent.views.OpenAI")
+    def test_openai_error_returns_json_not_raw_traceback(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_client.audio.speech.create.side_effect = RuntimeError("quota exceeded")
+        mock_openai_cls.return_value = mock_client
+
+        response = self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": "hi"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("error", response.json())
+
+    @override_settings(OPENAI_API_KEY="")
+    def test_missing_api_key_returns_clear_error(self):
+        response = self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": "hi"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 500)
+
+    @patch("agent.views.OpenAI")
+    def test_rate_limit_is_shared_with_chat_api(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_speech = MagicMock()
+        mock_speech.content = b"audio"
+        mock_client.audio.speech.create.return_value = mock_speech
+        mock_openai_cls.return_value = mock_client
+
+        # CHAT_RATE_LIMIT_MAX defaults to 10; exhaust it via tts_api alone
+        # to prove the two endpoints share one counter.
+        for _ in range(settings.CHAT_RATE_LIMIT_MAX):
+            self.client.post(
+                reverse("tts_api"),
+                data=json.dumps({"text": "hi"}),
+                content_type="application/json",
+            )
+
+        response = self.client.post(
+            reverse("tts_api"),
+            data=json.dumps({"text": "one too many"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 429)
