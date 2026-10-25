@@ -104,6 +104,14 @@ CACHES = {
 CHAT_RATE_LIMIT_MAX = int(os.environ.get("CHAT_RATE_LIMIT_MAX", "10"))
 CHAT_RATE_LIMIT_WINDOW = int(os.environ.get("CHAT_RATE_LIMIT_WINDOW", "60"))
 CHAT_HISTORY_MAX_TURNS = int(os.environ.get("CHAT_HISTORY_MAX_TURNS", "10"))
+# Longest single chat message accepted, so one request can't send an
+# arbitrarily large (and arbitrarily expensive) prompt to the LLM.
+CHAT_MESSAGE_MAX_CHARS = int(os.environ.get("CHAT_MESSAGE_MAX_CHARS", "1000"))
+
+# Seconds before an OpenAI call gives up (the SDK default is 10 minutes),
+# and how many times it retries transient failures.
+OPENAI_TIMEOUT = float(os.environ.get("OPENAI_TIMEOUT", "30"))
+OPENAI_MAX_RETRIES = int(os.environ.get("OPENAI_MAX_RETRIES", "2"))
 
 # --- Escalation notifications -------------------------------------------
 # When the agent flags a chat with [ESCALATE], agent/signals.py fires these
@@ -122,6 +130,8 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@deskyard.local")
+# Without this, a hung SMTP server blocks the sending thread forever.
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 
 # Address that gets emailed on every escalation. Empty string = disabled.
 SUPPORT_NOTIFICATION_EMAIL = os.environ.get("SUPPORT_NOTIFICATION_EMAIL", "")

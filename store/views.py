@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from .models import Order, OrderItem, Product
 
@@ -27,12 +28,28 @@ def _is_ajax(request) -> bool:
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
-def _cart_total(cart: dict) -> Decimal:
-    total = Decimal("0.00")
-    for product_id, quantity in cart.items():
-        product = get_object_or_404(Product, pk=product_id)
-        total += product.price * quantity
-    return total
+def _cart_lines(request) -> list[dict]:
+    """Load every product in the cart with one query. Lines whose product
+    no longer exists (deleted in the admin) are dropped from the session
+    instead of 404ing the whole cart page forever."""
+    cart = _get_cart(request)
+    products = Product.objects.in_bulk([int(pk) for pk in cart.keys()])
+
+    lines = []
+    for product_id, quantity in list(cart.items()):
+        product = products.get(int(product_id))
+        if product is None:
+            del cart[product_id]
+            request.session.modified = True
+            continue
+        lines.append(
+            {"product": product, "quantity": quantity, "subtotal": product.price * quantity}
+        )
+    return lines
+
+
+def _cart_total(lines: list[dict]) -> Decimal:
+    return sum((line["subtotal"] for line in lines), Decimal("0.00"))
 
 
 def product_list(request):
@@ -73,14 +90,13 @@ def product_detail(request, pk):
     return render(request, "store/product_detail.html", {"product": product})
 
 
+@require_POST
 def add_to_cart(request, pk):
     product = get_object_or_404(Product, pk=pk)
-    quantity = 1
-    if request.method == "POST":
-        try:
-            quantity = max(int(request.POST.get("quantity", 1)), 1)
-        except (TypeError, ValueError):
-            quantity = 1
+    try:
+        quantity = max(int(request.POST.get("quantity", 1)), 1)
+    except (TypeError, ValueError):
+        quantity = 1
     cart = _get_cart(request)
     cart[str(pk)] = cart.get(str(pk), 0) + quantity
     request.session.modified = True
@@ -99,18 +115,20 @@ def add_to_cart(request, pk):
     return redirect("view_cart")
 
 
+@require_POST
 def remove_from_cart(request, pk):
     cart = _get_cart(request)
     cart.pop(str(pk), None)
     request.session.modified = True
 
     if _is_ajax(request):
+        lines = _cart_lines(request)
         return JsonResponse(
             {
                 "ok": True,
                 "cart_count": sum(cart.values()),
                 "removed_product_id": pk,
-                "total": str(_cart_total(cart)),
+                "total": str(_cart_total(lines)),
                 "cart_empty": len(cart) == 0,
             }
         )
@@ -118,14 +136,8 @@ def remove_from_cart(request, pk):
 
 
 def view_cart(request):
-    cart = _get_cart(request)
-    items = []
-    for product_id, quantity in cart.items():
-        product = get_object_or_404(Product, pk=product_id)
-        subtotal = product.price * quantity
-        items.append({"product": product, "quantity": quantity, "subtotal": subtotal})
-    total = _cart_total(cart)
-    return render(request, "store/cart.html", {"items": items, "total": total})
+    lines = _cart_lines(request)
+    return render(request, "store/cart.html", {"items": lines, "total": _cart_total(lines)})
 
 
 @login_required
@@ -154,9 +166,12 @@ def checkout(request):
             # the database is Postgres or MySQL.
             products = {}
             for product_id in sorted(cart.keys(), key=int):
-                product = get_object_or_404(
-                    Product.objects.select_for_update(), pk=product_id
-                )
+                product = Product.objects.select_for_update().filter(pk=product_id).first()
+                if product is None:
+                    raise ValueError(
+                        "An item in your cart is no longer available and has "
+                        "been removed. Please review your cart and try again."
+                    )
                 quantity = cart[product_id]
                 if quantity > product.stock:
                     raise ValueError(
@@ -178,6 +193,7 @@ def checkout(request):
                 product.save()
     except ValueError as exc:
         messages.error(request, str(exc))
+        # view_cart prunes any deleted products from the session.
         return redirect("view_cart")
 
     request.session["cart"] = {}

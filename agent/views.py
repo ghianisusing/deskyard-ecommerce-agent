@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 from django.conf import settings
@@ -12,8 +13,22 @@ from store.models import Product
 from .knowledge_base import format_knowledge_base
 from .models import ChatLog
 
+logger = logging.getLogger(__name__)
+
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 MAX_TTS_CHARS = 2000
+CHAT_HISTORY_SESSION_KEY = "chat_history"
+
+
+def _openai_client() -> OpenAI:
+    """One place to build the client so every call gets a bounded timeout.
+    The SDK default is 10 minutes, which would tie up a worker that long
+    if OpenAI hangs."""
+    return OpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        timeout=settings.OPENAI_TIMEOUT,
+        max_retries=settings.OPENAI_MAX_RETRIES,
+    )
 
 
 def build_product_context() -> str:
@@ -138,12 +153,25 @@ def chat_api(request):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    user_message = (body.get("message") or "").strip()
-    history = body.get("history") or []  # [{role: "user"|"assistant", content}]
+    raw_message = body.get("message")
+    user_message = raw_message.strip() if isinstance(raw_message, str) else ""
 
     if not user_message:
         return JsonResponse({"error": "Empty message"}, status=400)
+
+    if len(user_message) > settings.CHAT_MESSAGE_MAX_CHARS:
+        return JsonResponse(
+            {
+                "error": (
+                    f"That message is too long. Please keep it under "
+                    f"{settings.CHAT_MESSAGE_MAX_CHARS} characters."
+                )
+            },
+            status=400,
+        )
 
     if not settings.OPENAI_API_KEY:
         return JsonResponse(
@@ -151,30 +179,47 @@ def chat_api(request):
             status=500,
         )
 
+    # Conversation history lives in the session, not the request body, so
+    # a client can't inflate token cost with a huge history or forge
+    # "assistant" turns to steer the agent. The widget sends
+    # new_conversation on the first message after a page load so the agent
+    # doesn't remember a conversation the customer can no longer see.
+    if body.get("new_conversation"):
+        history = []
+    else:
+        history = request.session.get(CHAT_HISTORY_SESSION_KEY, [])
+
     # Cap how much history gets resent each turn so token cost doesn't grow
     # unbounded as a conversation gets longer.
     max_entries = settings.CHAT_HISTORY_MAX_TURNS * 2
     history = history[-max_entries:]
 
     messages = [{"role": "system", "content": build_system_prompt(request)}]
-    for turn in history:
-        role = turn.get("role") if turn.get("role") in ("user", "assistant") else "user"
-        messages.append({"role": role, "content": turn.get("content", "")})
+    messages.extend(history)
     messages.append({"role": "user", "content": user_message})
 
     try:
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        response = client.chat.completions.create(
+        response = _openai_client().chat.completions.create(
             model=MODEL,
             messages=messages,
             max_tokens=500,
         )
-    except Exception as exc:  # noqa: BLE001 - surface any provider error to the UI, never crash
+    except Exception as exc:  # noqa: BLE001 - surface a clean error to the UI, never crash
+        logger.exception("Chat completion failed")
         _log_chat(request, user_message, error=str(exc))
-        return JsonResponse({"error": f"Agent error: {exc}"}, status=502)
+        return JsonResponse(
+            {"error": "Sorry, the assistant is having trouble right now. Please try again in a moment."},
+            status=502,
+        )
 
     reply_text = response.choices[0].message.content
     reply_text, escalate = parse_agent_reply(reply_text)
+
+    history = history + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": reply_text},
+    ]
+    request.session[CHAT_HISTORY_SESSION_KEY] = history[-max_entries:]
 
     _log_chat(request, user_message, reply=reply_text, escalated=escalate)
 
@@ -208,8 +253,11 @@ def tts_api(request):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    text = (body.get("text") or "").strip()
+    raw_text = body.get("text")
+    text = raw_text.strip() if isinstance(raw_text, str) else ""
     if not text:
         return JsonResponse({"error": "Empty text"}, status=400)
     # Defense in depth: normal callers only ever send a chat reply, which
@@ -221,13 +269,13 @@ def tts_api(request):
         return JsonResponse({"error": "Server is missing OPENAI_API_KEY."}, status=500)
 
     try:
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        speech = client.audio.speech.create(
+        speech = _openai_client().audio.speech.create(
             model=settings.OPENAI_TTS_MODEL,
             voice=settings.OPENAI_TTS_VOICE,
             input=text,
         )
-    except Exception as exc:  # noqa: BLE001 - never crash; frontend falls back to browser TTS
-        return JsonResponse({"error": f"TTS error: {exc}"}, status=502)
+    except Exception:  # noqa: BLE001 - never crash; frontend falls back to browser TTS
+        logger.exception("Text-to-speech failed")
+        return JsonResponse({"error": "Text-to-speech is unavailable right now."}, status=502)
 
     return HttpResponse(speech.content, content_type="audio/mpeg")

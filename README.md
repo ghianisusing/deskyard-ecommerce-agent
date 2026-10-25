@@ -182,10 +182,14 @@ no template changes needed either way.
   optional and off by default — set `SUPPORT_NOTIFICATION_EMAIL` and/or
   `SLACK_ESCALATION_WEBHOOK_URL` in `.env` to enable. Either channel
   failing (bad SMTP config, dead webhook) is caught and logged — it can
-  never break the chat response the customer already received.
-- **Cost control** — conversation history sent to OpenAI is capped to the
-  last `CHAT_HISTORY_MAX_TURNS` turns (default 10) instead of growing
-  unbounded as a chat gets longer.
+  never break the chat response the customer already received. Delivery
+  runs in a background thread after the database commit, so a slow mail
+  server or webhook never delays the customer's reply.
+- **Cost control** — conversation history is kept server-side in the
+  session (the browser can't send or forge it), capped to the last
+  `CHAT_HISTORY_MAX_TURNS` turns (default 10). Single messages are capped
+  at `CHAT_MESSAGE_MAX_CHARS` (default 1000), and OpenAI calls time out
+  after `OPENAI_TIMEOUT` seconds (default 30).
 - **Logging** — every `/api/chat/` call (success, escalation, or error) is
   recorded in a `ChatLog` row, visible read-only at `/admin/` under
   Agent > Chat logs.

@@ -13,7 +13,10 @@ const floatingStatusText   = document.getElementById("deskie-floating-status");
 const floatingEndBtn       = document.getElementById("deskie-floating-end");
 const floatingTranscriptBtn = document.getElementById("deskie-floating-transcript");
 
-let history  = []; // [{role: "user"|"assistant", content: "…"}]
+// The server keeps the conversation history in the session. This flag
+// tells it to start fresh on the first message after a page load, so the
+// agent never remembers a conversation the customer can't see anymore.
+let newConversation = true;
 let greeted  = false;
 let isSending = false;
 let deskieResetTimer = null;
@@ -171,7 +174,7 @@ async function sendToAgent(text, { speakReply = false } = {}) {
     const res = await fetch("/api/chat/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, history }),
+      body: JSON.stringify({ message: text, new_conversation: newConversation }),
     });
 
     typingEl.remove();
@@ -195,8 +198,7 @@ async function sendToAgent(text, { speakReply = false } = {}) {
     }
 
     addMessage(data.reply, "agent", "happy");
-    history.push({ role: "user", content: text });
-    history.push({ role: "assistant", content: data.reply });
+    newConversation = false;
 
     const afterReply = () => {
       if (data.escalate) {

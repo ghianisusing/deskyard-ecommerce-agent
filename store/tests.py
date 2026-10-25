@@ -6,8 +6,9 @@ from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connections
+from django.db import connection, connections
 from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from .models import Order, OrderItem, Product
@@ -395,3 +396,70 @@ class CartAjaxTests(TestCase):
         self.client.post(reverse("add_to_cart", args=[self.product.pk]), {"quantity": 1})
         response = self.client.post(reverse("remove_from_cart", args=[self.product.pk]))
         self.assertRedirects(response, reverse("view_cart"))
+
+
+class DeletedProductInCartTests(TestCase):
+    """A product deleted in the admin used to 404 the cart page forever for
+    anyone who had it in their session."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="carol", password="testpass123")
+        self.client.login(username="carol", password="testpass123")
+        self.kept = Product.objects.create(name="Desk Mat", price=Decimal("12.00"), stock=5)
+        self.doomed = Product.objects.create(name="Old Lamp", price=Decimal("30.00"), stock=5)
+        self.client.post(reverse("add_to_cart", args=[self.kept.pk]))
+        self.client.post(reverse("add_to_cart", args=[self.doomed.pk]))
+        self.doomed.delete()
+
+    def test_cart_still_loads_and_drops_the_missing_line(self):
+        response = self.client.get(reverse("view_cart"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Desk Mat")
+        self.assertNotContains(response, "Old Lamp")
+        self.assertEqual(response.context["total"], Decimal("12.00"))
+        self.assertEqual(self.client.session["cart"], {str(self.kept.pk): 1})
+
+    def test_checkout_redirects_with_a_message_instead_of_404(self):
+        response = self.client.post(reverse("checkout"), follow=True)
+        self.assertRedirects(response, reverse("view_cart"))
+        self.assertContains(response, "no longer available")
+        self.assertFalse(Order.objects.exists())
+        self.kept.refresh_from_db()
+        self.assertEqual(self.kept.stock, 5)
+
+
+class CartQueryCountTests(TestCase):
+    def test_product_queries_do_not_grow_with_cart_size(self):
+        def product_queries_for_cart_page():
+            with CaptureQueriesContext(connection) as ctx:
+                self.client.get(reverse("view_cart"))
+            return [q for q in ctx.captured_queries if "store_product" in q["sql"]]
+
+        first = Product.objects.create(name="Item 0", price=Decimal("1.00"), stock=5)
+        self.client.post(reverse("add_to_cart", args=[first.pk]))
+        baseline = len(product_queries_for_cart_page())
+
+        for i in range(1, 6):
+            product = Product.objects.create(name=f"Item {i}", price=Decimal("1.00"), stock=5)
+            self.client.post(reverse("add_to_cart", args=[product.pk]))
+
+        self.assertEqual(len(product_queries_for_cart_page()), baseline)
+
+
+class CartRequiresPostTests(TestCase):
+    """Cart changes must not happen on GET, or any page could add items to
+    a visitor's cart with an image tag or a link."""
+
+    def setUp(self):
+        self.product = Product.objects.create(name="Mouse", price=Decimal("20.00"), stock=5)
+
+    def test_get_cannot_add_to_cart(self):
+        response = self.client.get(reverse("add_to_cart", args=[self.product.pk]))
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(self.client.session.get("cart", {}), {})
+
+    def test_get_cannot_remove_from_cart(self):
+        self.client.post(reverse("add_to_cart", args=[self.product.pk]))
+        response = self.client.get(reverse("remove_from_cart", args=[self.product.pk]))
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(self.client.session["cart"], {str(self.product.pk): 1})
