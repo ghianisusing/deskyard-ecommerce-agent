@@ -106,9 +106,7 @@ def _build_slack_job(chat_log: ChatLog) -> Callable[[], None] | None:
 
     pk = chat_log.pk
     text = (
-        f":bell: *Chat escalated* — {_who(chat_log)}\n"
-        f"> {chat_log.message}\n"
-        f"Agent replied: {chat_log.reply}"
+        f":bell: *Chat escalated* — {_who(chat_log)}\n> {chat_log.message}\nAgent replied: {chat_log.reply}"
     )
 
     def job() -> None:

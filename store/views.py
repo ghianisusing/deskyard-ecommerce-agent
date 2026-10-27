@@ -42,9 +42,7 @@ def _cart_lines(request) -> list[dict]:
             del cart[product_id]
             request.session.modified = True
             continue
-        lines.append(
-            {"product": product, "quantity": quantity, "subtotal": product.price * quantity}
-        )
+        lines.append({"product": product, "quantity": quantity, "subtotal": product.price * quantity})
     return lines
 
 
@@ -175,8 +173,7 @@ def checkout(request):
                 quantity = cart[product_id]
                 if quantity > product.stock:
                     raise ValueError(
-                        f"Only {product.stock} left of '{product.name}' "
-                        f"(you have {quantity} in your cart)."
+                        f"Only {product.stock} left of '{product.name}' (you have {quantity} in your cart)."
                     )
                 products[product_id] = product
 

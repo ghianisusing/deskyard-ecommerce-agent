@@ -30,8 +30,7 @@ class ProductAdmin(admin.ModelAdmin):
         if not obj.image:
             return "—"
         return format_html(
-            '<img src="{}" style="height:36px;width:36px;object-fit:cover;'
-            'border-radius:4px;" />',
+            '<img src="{}" style="height:36px;width:36px;object-fit:cover;border-radius:4px;" />',
             obj.image.url,
         )
 
@@ -40,8 +39,7 @@ class ProductAdmin(admin.ModelAdmin):
         if not obj.image:
             return "No image uploaded — the storefront will fall back to the wireframe icon."
         return format_html(
-            '<img src="{}" style="max-height:220px;max-width:220px;'
-            'object-fit:cover;border-radius:6px;" />',
+            '<img src="{}" style="max-height:220px;max-width:220px;object-fit:cover;border-radius:6px;" />',
             obj.image.url,
         )
 
