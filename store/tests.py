@@ -151,7 +151,9 @@ class OrderTotalTests(TestCase):
 
     def test_order_total_is_zero_with_no_items(self):
         order = Order.objects.create(customer=self.user, status="pending")
-        self.assertEqual(order.total(), 0)
+        total = order.total()
+        self.assertIsInstance(total, Decimal)
+        self.assertEqual(str(total), "0.00")
 
     def test_order_total_reflects_price_at_purchase_not_current_price(self):
         order = Order.objects.create(customer=self.user, status="pending")
