@@ -163,8 +163,9 @@ no template changes needed either way.
   random one generated once into `.dev_secret_key` (gitignored). Security
   and clickjacking middleware are on, cookies are HTTPS-only outside debug
   mode, and registration enforces Django's password rules. The HTTPS
-  redirect (`DJANGO_SECURE_SSL_REDIRECT`) and HSTS
-  (`DJANGO_SECURE_HSTS_SECONDS`) are opt-in, since they depend on where
+  redirect (`DJANGO_SECURE_SSL_REDIRECT`), HSTS
+  (`DJANGO_SECURE_HSTS_SECONDS`) and HSTS preload
+  (`DJANGO_SECURE_HSTS_PRELOAD`) are opt-in, since they depend on where
   TLS is terminated.
 - **Rate limiting** — `/api/chat/` and `/api/tts/` cap messages per
   user, or per IP for guests (defaults: 10 messages / 60s, tunable via
@@ -221,9 +222,16 @@ ruff check .
 ruff format .
 ```
 
+To run the same lint and format checks before each commit:
+
+```
+pre-commit install
+```
+
 GitHub Actions (`.github/workflows/ci.yml`) runs lint, the formatting
-check, `manage.py check`, a missing-migrations check, and the test suite
-on every pull request and every push to `main`.
+check, `manage.py check`, `manage.py check --deploy` (against a full
+production configuration, failing on any warning), a missing-migrations
+check, and the test suite on every pull request and every push to `main`.
 
 Covers: checkout stock validation (rejects overselling, doesn't
 partially apply on failure), a concurrency test proving two simultaneous

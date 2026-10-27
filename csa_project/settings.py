@@ -103,6 +103,9 @@ CSRF_COOKIE_SECURE = not DEBUG
 SECURE_SSL_REDIRECT = _env_bool("DJANGO_SECURE_SSL_REDIRECT")
 SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_SECURE_HSTS_SECONDS", "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+# Only set this before submitting the domain to the browser preload list;
+# getting off that list takes months.
+SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0 and _env_bool("DJANGO_SECURE_HSTS_PRELOAD")
 if NUM_PROXIES:
     # Trust the proxy's report of the original scheme so request.is_secure()
     # (and the SSL redirect) work behind a TLS-terminating proxy.

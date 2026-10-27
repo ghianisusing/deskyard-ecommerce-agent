@@ -45,6 +45,17 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Django system check
         run: python manage.py check
+      - name: Deployment check
+        # Runs with a fully configured production setup and fails on any
+        # warning, so removing a security setting or middleware breaks CI.
+        # The values here exist only for this step.
+        run: |
+          DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(50))')" \
+          DJANGO_ALLOWED_HOSTS=shop.example.com \
+          DJANGO_SECURE_SSL_REDIRECT=True \
+          DJANGO_SECURE_HSTS_SECONDS=31536000 \
+          DJANGO_SECURE_HSTS_PRELOAD=True \
+          python manage.py check --deploy --fail-level WARNING
       - name: Missing migrations
         run: python manage.py makemigrations --check --dry-run
       - name: Tests
