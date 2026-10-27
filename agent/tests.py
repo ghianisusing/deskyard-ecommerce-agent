@@ -1,15 +1,20 @@
 import json
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.cache import cache
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from store.models import Order, OrderItem, Product
+
 from .models import ChatLog
-from .views import parse_agent_reply
+from .views import build_order_context, parse_agent_reply
 
 
 class ParseAgentReplyTests(TestCase):
@@ -582,3 +587,38 @@ class RateLimitClientIpTests(TestCase):
         # The proxy appends the real address last; forged entries go to the left.
         statuses = [self._chat_from("10.0.0.1", f"1.2.3.{i}, 198.51.100.9").status_code for i in range(3)]
         self.assertEqual(statuses, [200, 200, 429])
+
+
+class OrderContextQueryCountTests(TestCase):
+    """The chat builds the customer's order summary on every message, so it
+    must not run extra queries per order or per item."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="gina", password="testpass123")
+        self.products = [
+            Product.objects.create(name=f"Lamp {i}", price=Decimal("20.00"), stock=50) for i in range(3)
+        ]
+
+    def _place_order(self, products):
+        order = Order.objects.create(customer=self.user, status="pending")
+        for product in products:
+            OrderItem.objects.create(
+                order=order, product=product, quantity=2, price_at_purchase=product.price
+            )
+
+    def _count_queries(self):
+        with CaptureQueriesContext(connection) as ctx:
+            context = build_order_context(self.user)
+        return len(ctx.captured_queries), context
+
+    def test_query_count_does_not_grow_with_orders_or_items(self):
+        self._place_order(self.products[:1])
+        baseline, _ = self._count_queries()
+
+        for _ in range(4):
+            self._place_order(self.products)
+        queries, context = self._count_queries()
+
+        self.assertEqual(queries, baseline)
+        self.assertIn("2x Lamp 0, 2x Lamp 1, 2x Lamp 2", context)
+        self.assertIn("total $120.00", context)
