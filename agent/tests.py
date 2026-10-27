@@ -5,7 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from .models import ChatLog
@@ -500,3 +500,85 @@ class EscalationRunsOffTheRequestTests(TestCase):
             ChatLog.objects.create(message="help", reply="sorry", escalated=True)
             mock_runner.assert_not_called()
         self.assertEqual(len(callbacks), 1)
+
+
+@override_settings(OPENAI_API_KEY="test-key", CHAT_RATE_LIMIT_MAX=100)
+class ChatApiCsrfTests(TestCase):
+    """The chat and voice APIs use the session cookie (they read the
+    customer's orders), so they need CSRF protection like any form."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = Client(enforce_csrf_checks=True)
+
+    @patch("agent.views.OpenAI")
+    def test_requests_without_a_token_are_rejected(self, mock_openai_cls):
+        for url, payload in ((reverse("chat_api"), {"message": "hi"}), (reverse("tts_api"), {"text": "hi"})):
+            with self.subTest(url=url):
+                response = self.client.post(url, data=json.dumps(payload), content_type="application/json")
+                self.assertEqual(response.status_code, 403)
+        mock_openai_cls.assert_not_called()
+
+    @patch("agent.views.OpenAI")
+    def test_token_from_the_widget_is_accepted(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _mock_openai_response("Hi!")
+        mock_openai_cls.return_value = mock_client
+
+        page = self.client.get(reverse("product_list"))
+        token = page.context["csrf_token"]
+        self.assertContains(page, 'name="csrfmiddlewaretoken"')
+
+        response = self.client.post(
+            reverse("chat_api"),
+            data=json.dumps({"message": "hi"}),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=str(token),
+        )
+        self.assertEqual(response.status_code, 200)
+
+
+@override_settings(OPENAI_API_KEY="test-key", CHAT_RATE_LIMIT_MAX=2, CHAT_RATE_LIMIT_WINDOW=60)
+class RateLimitClientIpTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def _chat_from(self, remote_addr, forwarded_for=None):
+        extra = {"REMOTE_ADDR": remote_addr}
+        if forwarded_for is not None:
+            extra["HTTP_X_FORWARDED_FOR"] = forwarded_for
+        return self.client.post(
+            reverse("chat_api"), data=json.dumps({"message": "hi"}), content_type="application/json", **extra
+        )
+
+    def _mock(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _mock_openai_response("ok")
+        mock_openai_cls.return_value = mock_client
+
+    @override_settings(NUM_PROXIES=0)
+    @patch("agent.views.OpenAI")
+    def test_forged_forwarded_for_is_ignored_without_proxies(self, mock_openai_cls):
+        self._mock(mock_openai_cls)
+        # Same real address, a new fake X-Forwarded-For each time: still one bucket.
+        statuses = [self._chat_from("203.0.113.5", f"198.51.100.{i}").status_code for i in range(3)]
+        self.assertEqual(statuses, [200, 200, 429])
+
+    @override_settings(NUM_PROXIES=1)
+    @patch("agent.views.OpenAI")
+    def test_behind_one_proxy_each_client_gets_its_own_limit(self, mock_openai_cls):
+        self._mock(mock_openai_cls)
+        proxy = "10.0.0.1"
+        for _ in range(2):
+            self.assertEqual(self._chat_from(proxy, "198.51.100.7").status_code, 200)
+        self.assertEqual(self._chat_from(proxy, "198.51.100.7").status_code, 429)
+        # A different customer behind the same proxy is not affected.
+        self.assertEqual(self._chat_from(proxy, "198.51.100.8").status_code, 200)
+
+    @override_settings(NUM_PROXIES=1)
+    @patch("agent.views.OpenAI")
+    def test_behind_one_proxy_client_cannot_spoof_by_prepending(self, mock_openai_cls):
+        self._mock(mock_openai_cls)
+        # The proxy appends the real address last; forged entries go to the left.
+        statuses = [self._chat_from("10.0.0.1", f"1.2.3.{i}, 198.51.100.9").status_code for i in range(3)]
+        self.assertEqual(statuses, [200, 200, 429])

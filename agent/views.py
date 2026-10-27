@@ -5,7 +5,6 @@ import os
 from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from openai import OpenAI
 
 from store.models import Product
@@ -93,32 +92,50 @@ def parse_agent_reply(raw_text: str) -> tuple[str, bool]:
     return clean_text, escalate
 
 
+def _client_ip(request) -> str:
+    """The client's IP, trusting X-Forwarded-For only as far as the number
+    of proxies we know sit in front of the app (settings.NUM_PROXIES).
+
+    Each proxy appends the address it received the request from, so with N
+    trusted proxies the real client is the Nth entry from the end. Anything
+    to the left of that was sent by the client and can be forged, so it's
+    ignored. With no proxies configured the header is ignored entirely.
+    """
+    num_proxies = settings.NUM_PROXIES
+    if num_proxies > 0:
+        header = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        forwarded = [ip.strip() for ip in header.split(",") if ip.strip()]
+        if len(forwarded) >= num_proxies:
+            return forwarded[-num_proxies]
+    return request.META.get("REMOTE_ADDR", "unknown")
+
+
 def _rate_limit_key(request) -> str:
     """Rate limit per logged-in user, or per IP for guests."""
     if request.user.is_authenticated:
         return f"chat_rl:user:{request.user.id}"
-    ip = request.META.get("REMOTE_ADDR", "unknown")
-    return f"chat_rl:ip:{ip}"
+    return f"chat_rl:ip:{_client_ip(request)}"
 
 
 def _is_rate_limited(request) -> bool:
-    """Sliding-window-ish counter: N messages per WINDOW seconds. Uses the
-    default cache (in-memory, per-process) — fine for a single dev server;
-    swap for a shared cache like Redis before running multiple workers.
+    """Fixed-window counter: N messages per WINDOW seconds.
+
+    add() and incr() are each atomic, so concurrent requests can't both
+    read the same count and slip past the limit. The default cache is
+    in-memory and per-process, which is fine for one server process; point
+    CACHES at Redis before running multiple workers so they share counts.
     """
     key = _rate_limit_key(request)
-    count = cache.get(key)
-    if count is None:
-        cache.set(key, 1, timeout=settings.CHAT_RATE_LIMIT_WINDOW)
-        return False
-    if count >= settings.CHAT_RATE_LIMIT_MAX:
-        return True
+    window = settings.CHAT_RATE_LIMIT_WINDOW
+    if cache.add(key, 1, timeout=window):
+        return False  # first request in a new window
     try:
-        cache.incr(key)
+        count = cache.incr(key)
     except ValueError:
-        # Key expired between get() and incr() — start a fresh window.
-        cache.set(key, 1, timeout=settings.CHAT_RATE_LIMIT_WINDOW)
-    return False
+        # The window expired between add() and incr(); start a new one.
+        cache.set(key, 1, timeout=window)
+        return False
+    return count > settings.CHAT_RATE_LIMIT_MAX
 
 
 def _log_chat(request, message: str, reply: str = "", escalated: bool = False, error: str = ""):
@@ -131,7 +148,6 @@ def _log_chat(request, message: str, reply: str = "", escalated: bool = False, e
     )
 
 
-@csrf_exempt
 def chat_api(request):
     """Take a user message + history, return the agent's reply."""
     if request.method != "POST":
@@ -226,7 +242,6 @@ def chat_api(request):
     return JsonResponse({"reply": reply_text, "escalate": escalate})
 
 
-@csrf_exempt
 def tts_api(request):
     """Text -> natural-sounding speech (MP3 bytes) via OpenAI's TTS API,
     used by the browser voice call feature for Deskie's spoken replies.

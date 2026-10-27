@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -138,56 +138,63 @@ def view_cart(request):
     return render(request, "store/cart.html", {"items": lines, "total": _cart_total(lines)})
 
 
+def _stock_error(product_id: int, quantity: int) -> str:
+    """Explain why a cart line couldn't be decremented."""
+    product = Product.objects.filter(pk=product_id).first()
+    if product is None:
+        return (
+            "An item in your cart is no longer available and has been removed. "
+            "Please review your cart and try again."
+        )
+    return f"Only {product.stock} left of '{product.name}' (you have {quantity} in your cart)."
+
+
 @login_required
 def checkout(request):
+    # Placing an order must never happen on GET, or any page could trigger
+    # one with a link or <img>. A GET lands here after the login redirect
+    # (?next=/checkout/), so send the customer back to their cart instead
+    # of showing a bare 405.
+    if request.method != "POST":
+        return redirect("view_cart")
+
     cart = _get_cart(request)
     if not cart:
         return redirect("view_cart")
 
     try:
         with transaction.atomic():
-            # Validate every line has enough stock BEFORE creating anything,
-            # so a failure partway through can't leave a partial order or
-            # decrement stock for items that never get order rows.
+            # Each line decrements stock with one conditional UPDATE
+            # ("... SET stock = stock - n WHERE id = x AND stock >= n").
+            # The database checks and decrements in a single step, so two
+            # checkouts racing for the last unit can't both succeed on any
+            # backend, SQLite included, without relying on
+            # select_for_update() (a no-op on SQLite). If any line fails,
+            # raising inside atomic() rolls back every decrement made so
+            # far, so there is never a partial order.
             #
-            # select_for_update() locks each product row for the duration of
-            # this transaction, so two concurrent checkouts on the same
-            # product can't both pass the stock check before either
-            # decrements it. Iterate in a consistent pk order (not cart
-            # insertion order) so two checkouts with overlapping carts
-            # always acquire locks in the same sequence — otherwise you can
-            # get a classic A-locks-1-then-2 / B-locks-2-then-1 deadlock.
-            #
-            # Note: select_for_update() is a no-op on SQLite (this project's
-            # default DATABASES engine) — Django accepts the call but SQLite
-            # has no real row-level locking, so this only takes effect once
-            # the database is Postgres or MySQL.
-            products = {}
-            for product_id in sorted(cart.keys(), key=int):
-                product = Product.objects.select_for_update().filter(pk=product_id).first()
-                if product is None:
-                    raise ValueError(
-                        "An item in your cart is no longer available and has "
-                        "been removed. Please review your cart and try again."
-                    )
-                quantity = cart[product_id]
-                if quantity > product.stock:
-                    raise ValueError(
-                        f"Only {product.stock} left of '{product.name}' (you have {quantity} in your cart)."
-                    )
-                products[product_id] = product
-
-            order = Order.objects.create(customer=request.user, status="pending")
-            for product_id, quantity in cart.items():
-                product = products[product_id]
-                OrderItem.objects.create(
-                    order=order,
-                    product=product,
-                    quantity=quantity,
-                    price_at_purchase=product.price,
+            # Lines go in a consistent pk order so two checkouts with
+            # overlapping carts take row locks in the same sequence and
+            # can't deadlock each other on Postgres/MySQL.
+            line_items = sorted(((int(pk), qty) for pk, qty in cart.items()), key=lambda line: line[0])
+            for product_id, quantity in line_items:
+                decremented = Product.objects.filter(pk=product_id, stock__gte=quantity).update(
+                    stock=F("stock") - quantity
                 )
-                product.stock -= quantity
-                product.save()
+                if not decremented:
+                    raise ValueError(_stock_error(product_id, quantity))
+
+            products = Product.objects.in_bulk([product_id for product_id, _ in line_items])
+            order = Order.objects.create(customer=request.user, status="pending")
+            OrderItem.objects.bulk_create(
+                OrderItem(
+                    order=order,
+                    product=products[product_id],
+                    quantity=quantity,
+                    price_at_purchase=products[product_id].price,
+                )
+                for product_id, quantity in line_items
+            )
     except ValueError as exc:
         messages.error(request, str(exc))
         # view_cart prunes any deleted products from the session.

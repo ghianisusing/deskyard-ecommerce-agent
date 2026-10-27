@@ -31,8 +31,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      # Tests mock OpenAI, so no real key is needed. A fixed secret key keeps
-      # settings from generating .dev_secret_key on the runner.
+      # Tests mock OpenAI, so no real key is needed. DJANGO_DEBUG is left
+      # unset so tests run against the production settings, which require
+      # a secret key.
       DJANGO_SECRET_KEY: ci-only-not-secret
     steps:
       - uses: actions/checkout@v4

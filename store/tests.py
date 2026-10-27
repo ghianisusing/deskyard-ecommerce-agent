@@ -1,13 +1,17 @@
 import io
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection, connections
-from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.db import OperationalError, connection, connections
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
@@ -73,37 +77,52 @@ class CheckoutRaceConditionTests(TransactionTestCase):
     threads/connections need actual commits to interact, which only
     TransactionTestCase allows.
 
-    On the project's default SQLite backend, select_for_update() is a
-    no-op, so this test mainly documents the intended behavior and will
-    reliably catch a regression once run against Postgres/MySQL — SQLite's
-    own file-level write serialization may mask a regression in the
-    select_for_update() logic itself.
+    Only the checkout requests run concurrently. Logging in and filling the
+    carts happens first, one after the other: that setup isn't what's under
+    test, and SQLite's in-memory test database rejects concurrent writes
+    outright ("database table is locked") instead of waiting.
     """
 
     def setUp(self):
         self.product = Product.objects.create(name="Limited Edition Widget", price=Decimal("10.00"), stock=1)
-        self.alice = User.objects.create_user(username="alice", password="testpass123")
-        self.bob = User.objects.create_user(username="bob", password="testpass123")
+        self.clients = []
+        for username in ("alice", "bob"):
+            User.objects.create_user(username=username, password="testpass123")
+            client = Client()
+            client.login(username=username, password="testpass123")
+            client.post(reverse("add_to_cart", args=[self.product.pk]))
+            self.clients.append(client)
 
-    def _buy_one(self, username, password, results, index):
-        client = Client()
-        client.login(username=username, password=password)
-        client.post(reverse("add_to_cart", args=[self.product.pk]))
-        response = client.post(reverse("checkout"), follow=True)
-        results[index] = response
-        connections.close_all()
+    def _checkout(self, client, barrier, errors, index):
+        barrier.wait()  # release both checkouts at the same moment
+        try:
+            client.post(reverse("checkout"))
+        except OperationalError:
+            # SQLite's in-memory test database may refuse a concurrent write
+            # (the stock update, or the session save after it) instead of
+            # waiting. That's an artifact of the test database; the database
+            # state checked below is what proves there's no oversell.
+            pass
+        except Exception as exc:  # noqa: BLE001 - surfaced as a test failure below
+            errors[index] = exc
+        finally:
+            connections.close_all()
 
     def test_concurrent_checkouts_cannot_oversell_last_unit(self):
-        results = [None, None]
-        t1 = threading.Thread(target=self._buy_one, args=("alice", "testpass123", results, 0))
-        t2 = threading.Thread(target=self._buy_one, args=("bob", "testpass123", results, 1))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
+        errors = [None, None]
+        barrier = threading.Barrier(2)
+        threads = [
+            threading.Thread(target=self._checkout, args=(client, barrier, errors, i))
+            for i, client in enumerate(self.clients)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
+        self.assertEqual(errors, [None, None], "checkout raised an unexpected error")
         self.product.refresh_from_db()
-        self.assertGreaterEqual(self.product.stock, 0, "stock must never go negative — overselling occurred")
+        self.assertEqual(self.product.stock, 0, "stock must never go negative — overselling occurred")
         self.assertEqual(
             Order.objects.count(),
             1,
@@ -447,3 +466,82 @@ class CartRequiresPostTests(TestCase):
         response = self.client.get(reverse("remove_from_cart", args=[self.product.pk]))
         self.assertEqual(response.status_code, 405)
         self.assertEqual(self.client.session["cart"], {str(self.product.pk): 1})
+
+
+class CheckoutRequiresPostTests(TestCase):
+    """GET /checkout/ must never place an order, or a link or image on any
+    page could buy things on a logged-in customer's behalf."""
+
+    def setUp(self):
+        User.objects.create_user(username="dave", password="testpass123")
+        self.product = Product.objects.create(name="Monitor Arm", price=Decimal("50.00"), stock=5)
+
+    def test_get_redirects_to_cart_without_ordering(self):
+        self.client.login(username="dave", password="testpass123")
+        self.client.post(reverse("add_to_cart", args=[self.product.pk]))
+
+        response = self.client.get(reverse("checkout"))
+
+        self.assertRedirects(response, reverse("view_cart"))
+        self.assertFalse(Order.objects.exists())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+        self.assertEqual(self.client.session["cart"], {str(self.product.pk): 1})
+
+    def test_guest_is_sent_to_login_then_back_to_cart(self):
+        self.client.post(reverse("add_to_cart", args=[self.product.pk]))
+        response = self.client.post(reverse("checkout"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+
+        # After logging in, the ?next= redirect is a GET: back to the cart.
+        self.client.login(username="dave", password="testpass123")
+        self.assertRedirects(self.client.get(reverse("checkout")), reverse("view_cart"))
+
+
+class RegistrationPasswordRulesTests(TestCase):
+    def test_weak_password_is_rejected(self):
+        response = self.client.post(
+            reverse("register"), {"username": "erin", "password1": "12345", "password2": "12345"}
+        )
+        self.assertEqual(response.status_code, 200)  # form re-rendered with errors
+        self.assertFalse(User.objects.filter(username="erin").exists())
+
+    def test_strong_password_is_accepted(self):
+        password = "plum-orbit-castle-91"
+        self.client.post(
+            reverse("register"), {"username": "erin", "password1": password, "password2": password}
+        )
+        self.assertTrue(User.objects.filter(username="erin").exists())
+
+
+class SecurityHeadersTests(TestCase):
+    def test_pages_cannot_be_framed_and_sniffing_is_off(self):
+        response = self.client.get(reverse("product_list"))
+        self.assertEqual(response["X-Frame-Options"], "DENY")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+
+class ProductionSettingsGuardTests(SimpleTestCase):
+    """Settings are module-level, so check the guard in a fresh process."""
+
+    def _load_settings(self, **env):
+        full_env = {**os.environ, **env}
+        return subprocess.run(
+            [sys.executable, "-c", "import django; django.setup()"],
+            env={**full_env, "DJANGO_SETTINGS_MODULE": "csa_project.settings"},
+            cwd=settings.BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def test_refuses_to_start_without_secret_key_when_debug_is_off(self):
+        # Empty strings (not missing keys) so python-dotenv won't fill them from .env.
+        result = self._load_settings(DJANGO_DEBUG="False", DJANGO_SECRET_KEY="")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DJANGO_SECRET_KEY must be set", result.stderr)
+
+    def test_starts_with_secret_key_when_debug_is_off(self):
+        result = self._load_settings(DJANGO_DEBUG="False", DJANGO_SECRET_KEY="a-real-secret")
+        self.assertEqual(result.returncode, 0, result.stderr)
