@@ -1,0 +1,13 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["venv", "*/migrations/*"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import order, B: bugbear,
+# UP: pyupgrade, DJ: Django-specific checks.
+select = ["E", "W", "F", "I", "B", "UP", "DJ"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test-only mock wiring often needs long assertion lines.
+"*/tests.py" = ["E501"]

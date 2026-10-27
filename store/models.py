@@ -1,6 +1,7 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
-from decimal import Decimal
 
 
 class Product(models.Model):
@@ -48,13 +49,13 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self):
+        return f"Order #{self.pk} ({self.customer})"
+
     def total(self):
         total = sum((item.subtotal() for item in self.items.all()), Decimal('0.00'))
         # Return a plain int 0 when there are no items for compatibility with tests
         return total if total != Decimal('0.00') else 0
-
-    def __str__(self):
-        return f"Order #{self.pk} ({self.customer})"
 
 
 class OrderItem(models.Model):
@@ -62,6 +63,9 @@ class OrderItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField(default=1)
     price_at_purchase = models.DecimalField(max_digits=8, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.quantity}x {self.product} (order #{self.order_id})"
 
     def subtotal(self):
         return self.price_at_purchase * self.quantity

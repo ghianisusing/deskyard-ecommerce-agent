@@ -21,7 +21,7 @@ Design choices:
 
 import logging
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 import httpx
 from django.conf import settings
