@@ -17,6 +17,11 @@ const floatingTranscriptBtn = document.getElementById("deskie-floating-transcrip
 // tells it to start fresh on the first message after a page load, so the
 // agent never remembers a conversation the customer can't see anymore.
 let newConversation = true;
+
+// The chat and voice APIs are CSRF-protected like the rest of the site.
+// The token comes from the {% csrf_token %} field in the chat form.
+const csrfToken = formEl.querySelector("input[name=csrfmiddlewaretoken]")?.value || "";
+const jsonHeaders = { "Content-Type": "application/json", "X-CSRFToken": csrfToken };
 let greeted  = false;
 let isSending = false;
 let deskieResetTimer = null;
@@ -173,7 +178,7 @@ async function sendToAgent(text, { speakReply = false } = {}) {
   try {
     const res = await fetch("/api/chat/", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders,
       body: JSON.stringify({ message: text, new_conversation: newConversation }),
     });
 
@@ -271,7 +276,7 @@ async function speak(text, onDone) {
   try {
     const res = await fetch("/api/tts/", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders,
       body: JSON.stringify({ text }),
     });
     if (!res.ok) throw new Error(`TTS request failed (${res.status})`);

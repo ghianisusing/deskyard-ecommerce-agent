@@ -2,6 +2,7 @@ import os
 import secrets
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,9 +23,38 @@ def _get_dev_secret_key() -> str:
     return new_key
 
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or _get_dev_secret_key()
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_list(name: str) -> list[str]:
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+# Secure by default: DEBUG is off unless DJANGO_DEBUG=True is set (local
+# dev sets it in .env). Production mode refuses to start without a real
+# secret key instead of quietly using the generated dev one.
+DEBUG = _env_bool("DJANGO_DEBUG")
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is off. For local "
+            "development, set DJANGO_DEBUG=True in .env (see .env.example)."
+        )
+    SECRET_KEY = _get_dev_secret_key()
+
+# Comma-separated, e.g. "shop.example.com,www.shop.example.com".
+ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS") or (["localhost", "127.0.0.1", "[::1]"] if DEBUG else [])
+# Full origins, e.g. "https://shop.example.com". Needed for form posts
+# when the site is served over HTTPS behind a proxy on another host name.
+CSRF_TRUSTED_ORIGINS = _env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+
+# Number of reverse proxies (load balancer, nginx, etc.) in front of the
+# app that append to X-Forwarded-For. 0 means trust only REMOTE_ADDR, so
+# clients can't spoof their IP to dodge the chat rate limit.
+NUM_PROXIES = int(os.environ.get("DJANGO_NUM_PROXIES", "0"))
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -47,12 +77,36 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "django.middleware.common.CommonMiddleware",
+    "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# HTTPS hardening, on whenever DEBUG is off. The redirect and HSTS are
+# opt-in because they depend on how TLS is terminated: set
+# DJANGO_SECURE_SSL_REDIRECT=True if Django should redirect HTTP to HTTPS,
+# and DJANGO_SECURE_HSTS_SECONDS only once HTTPS is confirmed working
+# (browsers remember HSTS, so a mistake is hard to undo).
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_SSL_REDIRECT = _env_bool("DJANGO_SECURE_SSL_REDIRECT")
+SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_SECURE_HSTS_SECONDS", "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+if NUM_PROXIES:
+    # Trust the proxy's report of the original scheme so request.is_secure()
+    # (and the SSL redirect) work behind a TLS-terminating proxy.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "product_list"
@@ -86,6 +140,8 @@ DATABASES = {
 }
 
 STATIC_URL = "static/"
+# Where `manage.py collectstatic` gathers files for the web server in production.
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Uploaded product images (via /admin/) get saved here and served from
 # MEDIA_URL. In production, swap this for real object storage (S3, GCS,
@@ -139,3 +195,15 @@ SUPPORT_NOTIFICATION_EMAIL = os.environ.get("SUPPORT_NOTIFICATION_EMAIL", "")
 SLACK_ESCALATION_WEBHOOK_URL = os.environ.get("SLACK_ESCALATION_WEBHOOK_URL", "")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Send app logs (e.g. failed OpenAI calls, failed escalation alerts) to the
+# console, where the process manager or container runtime collects them.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "agent": {"handlers": ["console"], "level": "INFO"},
+        "store": {"handlers": ["console"], "level": "INFO"},
+    },
+}

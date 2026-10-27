@@ -155,26 +155,38 @@ no template changes needed either way.
 
 ## Recent hardening
 
-- **Rate limiting** — `/api/chat/` caps messages per session/IP (defaults:
-  10 messages / 60s, tunable via `CHAT_RATE_LIMIT_MAX` /
-  `CHAT_RATE_LIMIT_WINDOW` in `.env`). Uses Django's in-memory cache —
-  fine for one dev server; swap for Redis before running multiple worker
-  processes, since in-memory cache isn't shared across processes.
-- **Secret key** — no longer hardcoded. Set `DJANGO_SECRET_KEY` in `.env`
-  for anything beyond your laptop; locally it falls back to a random key
-  generated once into `.dev_secret_key` (gitignored).
-- **Checkout integrity** — wrapped in a database transaction and now
-  validates stock for every cart line *before* creating any order rows,
-  so a checkout that would oversell a product is rejected cleanly
-  instead of leaving a partial order or negative-adjacent stock.
-- **Checkout race condition** — stock validation locks each product row
-  with `select_for_update()` (rows locked in a consistent pk order to
-  avoid deadlocks between overlapping carts), so two customers can't both
-  pass the stock check on the last unit at the same instant. A DB-level
-  `CheckConstraint` also guarantees `stock` can never go negative
-  regardless of what the application code does. Note: `select_for_update()`
-  is a no-op on SQLite — this only takes real effect once you're on
-  Postgres or MySQL.
+- **Production settings** — everything deployment-specific comes from
+  the environment (see `.env.example`). `DEBUG` is off unless
+  `DJANGO_DEBUG=True`, and with it off the app refuses to start without
+  `DJANGO_SECRET_KEY` and only answers on `DJANGO_ALLOWED_HOSTS`. Locally,
+  keep `DJANGO_DEBUG=True` in `.env`; the secret key then falls back to a
+  random one generated once into `.dev_secret_key` (gitignored). Security
+  and clickjacking middleware are on, cookies are HTTPS-only outside debug
+  mode, and registration enforces Django's password rules. The HTTPS
+  redirect (`DJANGO_SECURE_SSL_REDIRECT`) and HSTS
+  (`DJANGO_SECURE_HSTS_SECONDS`) are opt-in, since they depend on where
+  TLS is terminated.
+- **Rate limiting** — `/api/chat/` and `/api/tts/` cap messages per
+  user, or per IP for guests (defaults: 10 messages / 60s, tunable via
+  `CHAT_RATE_LIMIT_MAX` / `CHAT_RATE_LIMIT_WINDOW`). The counter is
+  atomic. Behind a load balancer or reverse proxy, set
+  `DJANGO_NUM_PROXIES` so the real client IP is read from
+  `X-Forwarded-For`; with the default of 0 that header is ignored, so it
+  can't be forged to dodge the limit. Uses Django's in-memory cache —
+  fine for one server process; point `CACHES` at Redis before running
+  multiple workers, since in-memory cache isn't shared across processes.
+- **CSRF** — the chat and voice APIs are CSRF-protected like every form;
+  the widget sends the token from its `{% csrf_token %}` field.
+- **Checkout integrity** — checkout only places an order on POST (a GET
+  goes back to the cart), runs in one database transaction, and creates
+  nothing unless every cart line has enough stock.
+- **Checkout race condition** — each line decrements stock with a single
+  conditional `UPDATE ... SET stock = stock - n WHERE stock >= n`, so the
+  database checks and decrements in one step and two customers can't both
+  buy the last unit, on any database including SQLite. Lines are processed
+  in a consistent pk order to avoid deadlocks between overlapping carts on
+  Postgres/MySQL. A DB-level `CheckConstraint` also guarantees `stock` can
+  never go negative regardless of what the application code does.
 - **Escalation notifications** — when the agent flags a chat with
   `[ESCALATE]`, `agent/signals.py` fires a real email and/or Slack
   message the moment the `ChatLog` row is written, instead of that flag
