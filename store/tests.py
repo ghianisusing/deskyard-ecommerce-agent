@@ -545,3 +545,61 @@ class ProductionSettingsGuardTests(SimpleTestCase):
     def test_starts_with_secret_key_when_debug_is_off(self):
         result = self._load_settings(DJANGO_DEBUG="False", DJANGO_SECRET_KEY="a-real-secret")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+def _place_order(customer, products, quantity=1):
+    order = Order.objects.create(customer=customer, status="pending")
+    for product in products:
+        OrderItem.objects.create(
+            order=order, product=product, quantity=quantity, price_at_purchase=product.price
+        )
+    return order
+
+
+class OrderQueryCountTests(TestCase):
+    """Pages that list orders must not run extra queries per order or per
+    item, or they slow down as a customer's history grows."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="frank", password="testpass123")
+        self.client.login(username="frank", password="testpass123")
+        self.products = [
+            Product.objects.create(name=f"Gadget {i}", price=Decimal("5.00"), stock=100) for i in range(4)
+        ]
+
+    def _count_queries(self, fn):
+        with CaptureQueriesContext(connection) as ctx:
+            fn()
+        return len(ctx.captured_queries)
+
+    def test_order_history_query_count_does_not_grow_with_orders(self):
+        _place_order(self.user, self.products[:1])
+        baseline = self._count_queries(lambda: self.client.get(reverse("order_history")))
+
+        for _ in range(4):
+            _place_order(self.user, self.products)
+
+        response_queries = self._count_queries(lambda: self.client.get(reverse("order_history")))
+        self.assertEqual(response_queries, baseline)
+
+    def test_order_history_still_shows_items_and_totals(self):
+        _place_order(self.user, self.products[:2], quantity=3)
+        response = self.client.get(reverse("order_history"))
+        self.assertContains(response, "3 &times; Gadget 0")
+        self.assertContains(response, "3 &times; Gadget 1")
+        self.assertContains(response, "$30.00")
+
+    def test_order_confirmation_loads_items_in_one_query(self):
+        for product in self.products:
+            self.client.post(reverse("add_to_cart", args=[product.pk]))
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.post(reverse("checkout"))
+
+        self.assertEqual(response.status_code, 200)
+        for product in self.products:
+            self.assertContains(response, product.name)
+        item_selects = [
+            q for q in ctx.captured_queries if q["sql"].startswith("SELECT") and "store_orderitem" in q["sql"]
+        ]
+        self.assertEqual(len(item_selects), 1)

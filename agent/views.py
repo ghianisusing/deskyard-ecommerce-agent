@@ -51,7 +51,8 @@ def build_order_context(user) -> str:
             "history. If they ask about a specific order, ask them to log "
             "in first."
         )
-    orders = user.orders.all().order_by("-created_at")[:5]
+    # Prefetch items and their products: two extra queries total, not two per order.
+    orders = user.orders.prefetch_related("items__product").order_by("-created_at")[:5]
     if not orders:
         return "This customer is logged in but has no past orders."
     lines = ["This customer's recent orders:"]

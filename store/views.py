@@ -202,12 +202,15 @@ def checkout(request):
 
     request.session["cart"] = {}
     request.session.modified = True
+    order = Order.objects.prefetch_related("items__product").get(pk=order.pk)
     return render(request, "store/order_confirmation.html", {"order": order})
 
 
 @login_required
 def order_history(request):
-    orders = request.user.orders.all().order_by("-created_at")
+    # The template lists every item and its product name; prefetch them so
+    # the page costs the same few queries however many orders there are.
+    orders = request.user.orders.prefetch_related("items__product").order_by("-created_at")
     return render(request, "store/order_history.html", {"orders": orders})
 
 
