@@ -137,9 +137,7 @@ class EscalationEmailNotificationTests(SyncNotificationsMixin, TestCase):
     that ChatLog.escalated gets set to True."""
 
     def test_creating_an_escalated_chatlog_sends_email(self):
-        self.create_log(
-            message="I want a refund now", reply="I'm sorry, let me get a human.", escalated=True
-        )
+        self.create_log(message="I want a refund now", reply="I'm sorry, let me get a human.", escalated=True)
         self.assertEqual(len(mail.outbox), 1)
         sent = mail.outbox[0]
         self.assertEqual(sent.to, ["support@example.com"])
@@ -295,9 +293,7 @@ class TtsApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_invalid_json_is_rejected(self):
-        response = self.client.post(
-            reverse("tts_api"), data="not json", content_type="application/json"
-        )
+        response = self.client.post(reverse("tts_api"), data="not json", content_type="application/json")
         self.assertEqual(response.status_code, 400)
 
     def test_get_is_rejected(self):

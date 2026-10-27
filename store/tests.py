@@ -81,9 +81,7 @@ class CheckoutRaceConditionTests(TransactionTestCase):
     """
 
     def setUp(self):
-        self.product = Product.objects.create(
-            name="Limited Edition Widget", price=Decimal("10.00"), stock=1
-        )
+        self.product = Product.objects.create(name="Limited Edition Widget", price=Decimal("10.00"), stock=1)
         self.alice = User.objects.create_user(username="alice", password="testpass123")
         self.bob = User.objects.create_user(username="bob", password="testpass123")
 
@@ -97,21 +95,15 @@ class CheckoutRaceConditionTests(TransactionTestCase):
 
     def test_concurrent_checkouts_cannot_oversell_last_unit(self):
         results = [None, None]
-        t1 = threading.Thread(
-            target=self._buy_one, args=("alice", "testpass123", results, 0)
-        )
-        t2 = threading.Thread(
-            target=self._buy_one, args=("bob", "testpass123", results, 1)
-        )
+        t1 = threading.Thread(target=self._buy_one, args=("alice", "testpass123", results, 0))
+        t2 = threading.Thread(target=self._buy_one, args=("bob", "testpass123", results, 1))
         t1.start()
         t2.start()
         t1.join()
         t2.join()
 
         self.product.refresh_from_db()
-        self.assertGreaterEqual(
-            self.product.stock, 0, "stock must never go negative — overselling occurred"
-        )
+        self.assertGreaterEqual(self.product.stock, 0, "stock must never go negative — overselling occurred")
         self.assertEqual(
             Order.objects.count(),
             1,
@@ -128,8 +120,12 @@ class OrderTotalTests(TestCase):
         product_a = Product.objects.create(name="A", price=Decimal("10.00"), stock=10)
         product_b = Product.objects.create(name="B", price=Decimal("3.50"), stock=10)
 
-        OrderItem.objects.create(order=order, product=product_a, quantity=2, price_at_purchase=Decimal("10.00"))
-        OrderItem.objects.create(order=order, product=product_b, quantity=3, price_at_purchase=Decimal("3.50"))
+        OrderItem.objects.create(
+            order=order, product=product_a, quantity=2, price_at_purchase=Decimal("10.00")
+        )
+        OrderItem.objects.create(
+            order=order, product=product_b, quantity=3, price_at_purchase=Decimal("3.50")
+        )
 
         # 2 * 10.00 + 3 * 3.50 = 20.00 + 10.50 = 30.50
         self.assertEqual(order.total(), Decimal("30.50"))
@@ -200,9 +196,7 @@ class ProductListSearchAndFilterTests(TestCase):
         self.assertNotIn(self.mouse, products)
 
     def test_search_and_category_combine(self):
-        response = self.client.get(
-            reverse("product_list"), {"q": "lamp", "category": "input"}
-        )
+        response = self.client.get(reverse("product_list"), {"q": "lamp", "category": "input"})
         # "lamp" matches nothing in the "input" category
         self.assertEqual(len(response.context["products"]), 0)
 
@@ -286,9 +280,7 @@ class ProductImageUploadTests(TestCase):
 
     def test_product_with_image_renders_img_tag_on_list_page(self):
         product = Product.objects.create(name="Wireless Mouse", price=Decimal("19.99"), stock=5)
-        product.image.save(
-            "mouse.png", SimpleUploadedFile("mouse.png", _make_test_png(), "image/png")
-        )
+        product.image.save("mouse.png", SimpleUploadedFile("mouse.png", _make_test_png(), "image/png"))
 
         response = self.client.get(reverse("product_list"))
         self.assertContains(response, "<img")
@@ -296,9 +288,7 @@ class ProductImageUploadTests(TestCase):
 
     def test_product_with_image_renders_img_tag_on_detail_page(self):
         product = Product.objects.create(name="Wireless Mouse", price=Decimal("19.99"), stock=5)
-        product.image.save(
-            "mouse.png", SimpleUploadedFile("mouse.png", _make_test_png(), "image/png")
-        )
+        product.image.save("mouse.png", SimpleUploadedFile("mouse.png", _make_test_png(), "image/png"))
 
         response = self.client.get(reverse("product_detail", args=[product.pk]))
         self.assertContains(response, "<img")
@@ -313,12 +303,8 @@ class CartAjaxTests(TestCase):
     redirect — this class checks both paths for both endpoints."""
 
     def setUp(self):
-        self.product = Product.objects.create(
-            name="Wireless Mouse", price=Decimal("20.00"), stock=10
-        )
-        self.other_product = Product.objects.create(
-            name="USB-C Hub", price=Decimal("15.00"), stock=10
-        )
+        self.product = Product.objects.create(name="Wireless Mouse", price=Decimal("20.00"), stock=10)
+        self.other_product = Product.objects.create(name="USB-C Hub", price=Decimal("15.00"), stock=10)
 
     def test_add_to_cart_ajax_returns_json_without_redirecting(self):
         response = self.client.post(
@@ -335,9 +321,7 @@ class CartAjaxTests(TestCase):
         self.assertEqual(self.client.session["cart"], {str(self.product.pk): 2})
 
     def test_add_to_cart_without_ajax_header_still_redirects(self):
-        response = self.client.post(
-            reverse("add_to_cart", args=[self.product.pk]), {"quantity": 1}
-        )
+        response = self.client.post(reverse("add_to_cart", args=[self.product.pk]), {"quantity": 1})
         self.assertRedirects(response, reverse("view_cart"))
 
     def test_add_to_cart_ajax_accumulates_existing_quantity(self):

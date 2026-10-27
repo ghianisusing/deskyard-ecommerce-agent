@@ -200,6 +200,19 @@ no template changes needed either way.
 python manage.py test
 ```
 
+Linting and formatting use [ruff](https://docs.astral.sh/ruff/)
+(config in `pyproject.toml`):
+
+```
+pip install -r requirements-dev.txt
+ruff check .
+ruff format .
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, the formatting
+check, `manage.py check`, a missing-migrations check, and the test suite
+on every pull request and every push to `main`.
+
 Covers: checkout stock validation (rejects overselling, doesn't
 partially apply on failure), a concurrency test proving two simultaneous
 checkouts can't both claim the last unit of stock, order total

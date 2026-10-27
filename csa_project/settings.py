@@ -1,6 +1,7 @@
 import os
 import secrets
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -35,7 +36,7 @@ OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "tts-1")
 OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "nova")
 
 INSTALLED_APPS = [
-    'django.contrib.sessions',
+    "django.contrib.sessions",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -121,9 +122,7 @@ OPENAI_MAX_RETRIES = int(os.environ.get("OPENAI_MAX_RETRIES", "2"))
 # EMAIL_BACKEND defaults to printing to the console, which is fine for dev.
 # Set to "django.core.mail.backends.smtp.EmailBackend" (and the EMAIL_HOST*
 # settings below) to send real email in production.
-EMAIL_BACKEND = os.environ.get(
-    "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
+EMAIL_BACKEND = os.environ.get("DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
@@ -140,4 +139,3 @@ SUPPORT_NOTIFICATION_EMAIL = os.environ.get("SUPPORT_NOTIFICATION_EMAIL", "")
 SLACK_ESCALATION_WEBHOOK_URL = os.environ.get("SLACK_ESCALATION_WEBHOOK_URL", "")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
