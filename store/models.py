@@ -24,7 +24,7 @@ class Product(models.Model):
 
     class Meta:
         constraints = [
-            models.CheckConstraint(check=models.Q(stock__gte=0), name="store_product_stock_non_negative")
+            models.CheckConstraint(condition=models.Q(stock__gte=0), name="store_product_stock_non_negative")
         ]
 
     def __str__(self):
