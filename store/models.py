@@ -47,9 +47,7 @@ class Order(models.Model):
         return f"Order #{self.pk} ({self.customer})"
 
     def total(self):
-        total = sum((item.subtotal() for item in self.items.all()), Decimal("0.00"))
-        # Return a plain int 0 when there are no items for compatibility with tests
-        return total if total != Decimal("0.00") else 0
+        return sum((item.subtotal() for item in self.items.all()), Decimal("0.00"))
 
 
 class OrderItem(models.Model):
