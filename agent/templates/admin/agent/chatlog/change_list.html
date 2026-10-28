@@ -1,0 +1,15 @@
+{% extends "admin/change_list.html" %}
+
+{% block result_list %}
+  {% if usage_summary %}
+    <p class="usage-summary">
+      <strong>{{ usage_summary.chats }} chat{{ usage_summary.chats|pluralize }}</strong>
+      &middot; {{ usage_summary.tokens|default_if_none:0 }} tokens
+      &middot; est. ${{ usage_summary.cost|default_if_none:0|floatformat:4 }}
+      &middot; avg response
+      {% if usage_summary.avg_latency_ms is not None %}{{ usage_summary.avg_latency_ms|floatformat:0 }} ms{% else %}-{% endif %}
+      <br><small>Totals for the chats matching the current filters and search.</small>
+    </p>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

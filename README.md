@@ -206,6 +206,14 @@ no template changes needed either way.
 - **Logging** — every `/api/chat/` call (success, escalation, or error) is
   recorded in a `ChatLog` row, visible read-only at `/admin/` under
   Agent > Chat logs.
+- **Cost and speed tracking** — each chat log also stores the model, token
+  counts, response time, and an estimated cost. The admin list shows the
+  total chats, tokens, cost and average response time for whatever is
+  currently filtered (for example, one day or escalations only). The cost
+  uses `OPENAI_INPUT_PRICE_PER_1M` and `OPENAI_OUTPUT_PRICE_PER_1M`
+  (defaults are gpt-4o-mini's prices); update them if you change
+  `OPENAI_MODEL`. It doesn't count the cached-input discount, so it may
+  run slightly high, and voice replies (`/api/tts/`) aren't included.
 
 ## Running tests
 

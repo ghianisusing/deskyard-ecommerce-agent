@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+from decimal import Decimal
+from time import monotonic
 
 from django.conf import settings
 from django.core.cache import cache
@@ -139,13 +141,35 @@ def _is_rate_limited(request) -> bool:
     return count > settings.CHAT_RATE_LIMIT_MAX
 
 
-def _log_chat(request, message: str, reply: str = "", escalated: bool = False, error: str = ""):
+def _usage_fields(response) -> dict:
+    """Token counts and estimated cost from a chat completion response.
+
+    Each count is kept only if the API returned a real integer, so a
+    response without usage data leaves the fields empty instead of failing.
+    """
+    usage = getattr(response, "usage", None)
+    counts = {}
+    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = getattr(usage, name, None)
+        counts[name] = value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    cost = None
+    if counts["prompt_tokens"] is not None and counts["completion_tokens"] is not None:
+        cost = (
+            counts["prompt_tokens"] * settings.OPENAI_INPUT_PRICE_PER_1M
+            + counts["completion_tokens"] * settings.OPENAI_OUTPUT_PRICE_PER_1M
+        ) / Decimal(1_000_000)
+    return {**counts, "estimated_cost_usd": cost}
+
+
+def _log_chat(request, message: str, reply: str = "", escalated: bool = False, error: str = "", **usage):
     ChatLog.objects.create(
         user=request.user if request.user.is_authenticated else None,
         message=message,
         reply=reply,
         escalated=escalated,
         error=error,
+        **usage,
     )
 
 
@@ -215,6 +239,7 @@ def chat_api(request):
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
 
+    started = monotonic()
     try:
         response = _openai_client().chat.completions.create(
             model=MODEL,
@@ -223,12 +248,16 @@ def chat_api(request):
         )
     except Exception as exc:  # noqa: BLE001 - surface a clean error to the UI, never crash
         logger.exception("Chat completion failed")
-        _log_chat(request, user_message, error=str(exc))
+        # Time to failure includes retries, which shows when OpenAI is slow
+        # rather than down.
+        latency_ms = round((monotonic() - started) * 1000)
+        _log_chat(request, user_message, error=str(exc), model=MODEL, latency_ms=latency_ms)
         return JsonResponse(
             {"error": "Sorry, the assistant is having trouble right now. Please try again in a moment."},
             status=502,
         )
 
+    latency_ms = round((monotonic() - started) * 1000)
     reply_text = response.choices[0].message.content
     reply_text, escalate = parse_agent_reply(reply_text)
 
@@ -238,7 +267,15 @@ def chat_api(request):
     ]
     request.session[CHAT_HISTORY_SESSION_KEY] = history[-max_entries:]
 
-    _log_chat(request, user_message, reply=reply_text, escalated=escalate)
+    _log_chat(
+        request,
+        user_message,
+        reply=reply_text,
+        escalated=escalate,
+        model=MODEL,
+        latency_ms=latency_ms,
+        **_usage_fields(response),
+    )
 
     return JsonResponse({"reply": reply_text, "escalate": escalate})
 
