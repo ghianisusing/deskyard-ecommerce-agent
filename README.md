@@ -252,6 +252,28 @@ when uploaded), Deskie/voice-call/floating-assistant markup rendering,
 and the TTS endpoint (success, error handling, text length capping, and
 that its rate limit is genuinely shared with the chat endpoint).
 
+### Chat evals (real model)
+
+The tests above mock OpenAI. To check how the agent actually answers,
+run the scripted conversations in `agent/evals.py` against the real
+model, for example before and after changing the system prompt or
+`OPENAI_MODEL`:
+
+```
+python manage.py run_chat_evals
+python manage.py run_chat_evals --scenario order_status_logged_in --show-replies
+python manage.py run_chat_evals --list
+```
+
+Each scenario checks the reply with simple rules (does it escalate, does
+it mention or avoid certain words) and prints PASS or FAIL, with the reply
+for failures. The last line shows tokens, estimated cost and average
+response time; a full run is about 16 model calls and costs well under
+a cent with gpt-4o-mini. It needs `OPENAI_API_KEY`, runs in a throwaway
+database (your data and chat logs aren't touched), and switches off
+escalation alerts. Answers vary between runs, so a scenario that fails
+once is worth rerunning before you change anything. It's not part of CI.
+
 ## Next steps
 
 - Swap SQLite for Postgres or MySQL in `csa_project/settings.py`'s

@@ -732,3 +732,115 @@ class ChatLogAdminSummaryTests(TestCase):
         self.assertEqual(summary["chats"], 1)
         self.assertEqual(summary["tokens"], 300)
         self.assertEqual(summary["cost"], Decimal("0.0030"))
+
+
+class EvalCheckTests(TestCase):
+    """The pass/fail rules used by run_chat_evals, without calling OpenAI."""
+
+    def test_mentions_any_is_case_insensitive_and_fills_placeholders(self):
+        from .evals import Reply, mentions_any
+
+        check = mentions_any("#{order_id}")
+        self.assertTrue(check(Reply("Your ORDER #42 has shipped.", False), {"order_id": 42}).passed)
+        self.assertFalse(check(Reply("Your order has shipped.", False), {"order_id": 42}).passed)
+
+    def test_mentions_none_fails_when_any_term_appears(self):
+        from .evals import Reply, mentions_none
+
+        check = mentions_none("has shipped", "on its way")
+        self.assertTrue(check(Reply("I can't find that order.", False), {}).passed)
+        result = check(Reply("Good news, it's on its way!", False), {})
+        self.assertFalse(result.passed)
+        self.assertIn("on its way", result.description)
+
+    def test_escalation_checks(self):
+        from .evals import Reply, does_not_escalate, escalates
+
+        self.assertTrue(escalates()(Reply("Sorry.", True), {}).passed)
+        self.assertFalse(escalates()(Reply("Sorry.", False), {}).passed)
+        self.assertTrue(does_not_escalate()(Reply("Hi.", False), {}).passed)
+
+    def test_every_scenario_is_well_formed(self):
+        from .evals import SCENARIOS, Reply, run_checks
+
+        names = [s.name for s in SCENARIOS]
+        self.assertEqual(len(names), len(set(names)), "scenario names must be unique")
+        for scenario in SCENARIOS:
+            with self.subTest(scenario.name):
+                self.assertIn(scenario.user, ("guest", "customer", "new_customer"))
+                self.assertTrue(scenario.messages and scenario.checks)
+                for message in scenario.messages:
+                    message.format(order_id=1)
+                # Every check runs (placeholders resolve) on a sample reply.
+                run_checks(scenario, Reply("sample", False), {"order_id": 1})
+
+
+@override_settings(OPENAI_API_KEY="test-key")
+@patch("agent.management.commands.run_chat_evals.DiscoverRunner")
+class RunChatEvalsCommandTests(TestCase):
+    """The command's plumbing, with OpenAI mocked. The test database stands
+    in for the throwaway one the command normally creates."""
+
+    def setUp(self):
+        cache.clear()
+
+    def _call(self, *args):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("run_chat_evals", *args, stdout=out)
+        return out.getvalue()
+
+    @patch("agent.views.OpenAI")
+    def test_passing_scenario_reports_pass_and_usage(self, mock_openai_cls, _runner):
+        mock_openai_cls.return_value.chat.completions.create.return_value = _mock_openai_response_with_usage(
+            "Sorry about that, I'm getting a teammate.\n[ESCALATE]", prompt_tokens=900, completion_tokens=100
+        )
+        output = self._call("--scenario", "asks_for_human")
+        self.assertIn("PASS  asks_for_human", output)
+        self.assertIn("1/1 passed", output)
+        self.assertIn("1 model calls | 1000 tokens", output)
+
+    @patch("agent.views.OpenAI")
+    def test_failing_scenario_shows_the_reason_and_errors(self, mock_openai_cls, _runner):
+        from django.core.management.base import CommandError
+
+        mock_openai_cls.return_value.chat.completions.create.return_value = _mock_openai_response(
+            "I'm not sure, sorry."
+        )
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        with self.assertRaisesMessage(CommandError, "1 of 1 scenario(s) failed"):
+            call_command("run_chat_evals", "--scenario", "shipping_time", stdout=out)
+        output = out.getvalue()
+        self.assertIn("FAIL  shipping_time", output)
+        self.assertIn("expected: mentions '3-5'", output)
+        self.assertIn("reply: I'm not sure, sorry.", output)
+
+    @patch("agent.views.OpenAI")
+    def test_multi_turn_scenario_keeps_the_conversation(self, mock_openai_cls, _runner):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.return_value = _mock_openai_response("It's $39.00.")
+        self._call("--scenario", "follow_up_question")
+        # The second call includes the first exchange as history.
+        second_call_messages = create.call_args_list[1].kwargs["messages"]
+        contents = [m["content"] for m in second_call_messages]
+        self.assertIn("I'm looking at the Eval Desk Lamp.", contents)
+
+    def test_unknown_scenario_is_rejected(self, _runner):
+        from django.core.management.base import CommandError
+
+        with self.assertRaisesMessage(CommandError, "Unknown scenario(s): nope"):
+            self._call("--scenario", "nope")
+
+    @override_settings(OPENAI_API_KEY="")
+    def test_missing_api_key_is_rejected(self, _runner):
+        from django.core.management.base import CommandError
+
+        with self.assertRaisesMessage(CommandError, "OPENAI_API_KEY is not set"):
+            self._call()
