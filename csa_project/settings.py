@@ -1,5 +1,6 @@
 import os
 import secrets
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -172,6 +173,12 @@ CHAT_MESSAGE_MAX_CHARS = int(os.environ.get("CHAT_MESSAGE_MAX_CHARS", "1000"))
 # and how many times it retries transient failures.
 OPENAI_TIMEOUT = float(os.environ.get("OPENAI_TIMEOUT", "30"))
 OPENAI_MAX_RETRIES = int(os.environ.get("OPENAI_MAX_RETRIES", "2"))
+
+# USD per 1 million tokens for OPENAI_MODEL, used to estimate each chat's
+# cost in ChatLog. Defaults are gpt-4o-mini's list prices; update both if
+# you change the model or OpenAI changes its prices.
+OPENAI_INPUT_PRICE_PER_1M = Decimal(os.environ.get("OPENAI_INPUT_PRICE_PER_1M", "0.15"))
+OPENAI_OUTPUT_PRICE_PER_1M = Decimal(os.environ.get("OPENAI_OUTPUT_PRICE_PER_1M", "0.60"))
 
 # --- Escalation notifications -------------------------------------------
 # When the agent flags a chat with [ESCALATE], agent/signals.py fires these

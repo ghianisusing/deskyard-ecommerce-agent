@@ -14,7 +14,7 @@ from django.urls import reverse
 from store.models import Order, OrderItem, Product
 
 from .models import ChatLog
-from .views import build_order_context, parse_agent_reply
+from .views import MODEL, build_order_context, parse_agent_reply
 
 
 class ParseAgentReplyTests(TestCase):
@@ -622,3 +622,113 @@ class OrderContextQueryCountTests(TestCase):
         self.assertEqual(queries, baseline)
         self.assertIn("2x Lamp 0, 2x Lamp 1, 2x Lamp 2", context)
         self.assertIn("total $120.00", context)
+
+
+def _mock_openai_response_with_usage(content: str, prompt_tokens: int, completion_tokens: int):
+    response = _mock_openai_response(content)
+    response.usage = MagicMock(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+    return response
+
+
+@override_settings(
+    OPENAI_API_KEY="test-key",
+    CHAT_RATE_LIMIT_MAX=100,
+    OPENAI_INPUT_PRICE_PER_1M=Decimal("0.15"),
+    OPENAI_OUTPUT_PRICE_PER_1M=Decimal("0.60"),
+)
+class ChatUsageTrackingTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def _post(self):
+        return self.client.post(
+            reverse("chat_api"),
+            data=json.dumps({"message": "hello"}),
+            content_type="application/json",
+        )
+
+    @patch("agent.views.monotonic", side_effect=[10.0, 10.25])
+    @patch("agent.views.OpenAI")
+    def test_successful_chat_records_tokens_cost_and_latency(self, mock_openai_cls, _mock_clock):
+        mock_openai_cls.return_value.chat.completions.create.return_value = _mock_openai_response_with_usage(
+            "Hi there!", prompt_tokens=1000, completion_tokens=200
+        )
+
+        self.assertEqual(self._post().status_code, 200)
+
+        log = ChatLog.objects.get()
+        self.assertEqual(log.model, MODEL)
+        self.assertEqual(log.prompt_tokens, 1000)
+        self.assertEqual(log.completion_tokens, 200)
+        self.assertEqual(log.total_tokens, 1200)
+        self.assertEqual(log.latency_ms, 250)
+        # 1000 * 0.15/1M + 200 * 0.60/1M = 0.00015 + 0.00012
+        self.assertEqual(log.estimated_cost_usd, Decimal("0.00027"))
+
+    @patch("agent.views.monotonic", side_effect=[5.0, 35.0])
+    @patch("agent.views.OpenAI")
+    def test_failed_chat_records_latency_but_no_usage(self, mock_openai_cls, _mock_clock):
+        mock_openai_cls.return_value.chat.completions.create.side_effect = RuntimeError("timed out")
+
+        self.assertEqual(self._post().status_code, 502)
+
+        log = ChatLog.objects.get()
+        self.assertEqual(log.latency_ms, 30000)
+        self.assertEqual(log.model, MODEL)
+        self.assertIsNone(log.total_tokens)
+        self.assertIsNone(log.estimated_cost_usd)
+
+    @patch("agent.views.OpenAI")
+    def test_response_without_usage_still_succeeds(self, mock_openai_cls):
+        response = _mock_openai_response("Hi there!")
+        response.usage = None
+        mock_openai_cls.return_value.chat.completions.create.return_value = response
+
+        self.assertEqual(self._post().status_code, 200)
+
+        log = ChatLog.objects.get()
+        self.assertEqual(log.reply, "Hi there!")
+        self.assertIsNone(log.prompt_tokens)
+        self.assertIsNone(log.estimated_cost_usd)
+        self.assertIsNotNone(log.latency_ms)
+
+
+class ChatLogAdminSummaryTests(TestCase):
+    def setUp(self):
+        admin = User.objects.create_superuser("admin", "admin@example.com", "pw-for-tests-only")
+        self.client.force_login(admin)
+        ChatLog.objects.create(
+            message="a", total_tokens=100, latency_ms=200, estimated_cost_usd=Decimal("0.0010")
+        )
+        ChatLog.objects.create(
+            message="b",
+            escalated=True,
+            total_tokens=300,
+            latency_ms=400,
+            estimated_cost_usd=Decimal("0.0030"),
+        )
+        # A failed call: no usage, so it counts as a chat but adds no tokens.
+        ChatLog.objects.create(message="c", error="boom", latency_ms=600)
+        self.url = reverse("admin:agent_chatlog_changelist")
+
+    def test_summary_totals_all_chats(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        summary = response.context["usage_summary"]
+        self.assertEqual(summary["chats"], 3)
+        self.assertEqual(summary["tokens"], 400)
+        self.assertEqual(summary["cost"], Decimal("0.0040"))
+        self.assertEqual(summary["avg_latency_ms"], 400)
+        self.assertContains(response, "3 chats")
+        self.assertContains(response, "est. $0.0040")
+
+    def test_summary_follows_the_current_filter(self):
+        response = self.client.get(self.url, {"escalated__exact": "1"})
+        summary = response.context["usage_summary"]
+        self.assertEqual(summary["chats"], 1)
+        self.assertEqual(summary["tokens"], 300)
+        self.assertEqual(summary["cost"], Decimal("0.0030"))

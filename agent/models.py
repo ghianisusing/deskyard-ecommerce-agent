@@ -35,6 +35,17 @@ class ChatLog(models.Model):
     escalated = models.BooleanField(default=False)
     error = models.TextField(blank=True)
 
+    # What the OpenAI call cost and how long it took. Token counts are empty
+    # when the call failed or the API didn't report usage. The cost is an
+    # estimate at the prices configured when the call was made, stored so
+    # later price changes don't rewrite history.
+    model = models.CharField(max_length=100, blank=True)
+    prompt_tokens = models.PositiveIntegerField(null=True, blank=True)
+    completion_tokens = models.PositiveIntegerField(null=True, blank=True)
+    total_tokens = models.PositiveIntegerField(null=True, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    estimated_cost_usd = models.DecimalField(max_digits=12, decimal_places=8, null=True, blank=True)
+
     class Meta:
         ordering = ["-timestamp"]
 
