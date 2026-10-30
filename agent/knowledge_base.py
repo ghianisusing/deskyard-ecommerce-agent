@@ -1,12 +1,9 @@
 from .models import KnowledgeBaseEntry
 
 
-def format_knowledge_base() -> str:
-    """Render the knowledge base (from the database) as plain text for
-    the system prompt. Manage entries via /admin/ or the Django shell —
-    the agent always reads whatever is currently in the table.
+def knowledge_base_topics() -> list[str]:
+    """Topic names of the knowledge base entries in the database. The agent
+    sees only these names in its prompt and reads the content it needs with
+    the get_policies tool. Manage entries via /admin/ or the Django shell.
     """
-    entries = KnowledgeBaseEntry.objects.all()
-    if not entries:
-        return "No knowledge base entries yet."
-    return "\n\n".join(f"[{entry.topic}]\n{entry.content}" for entry in entries)
+    return list(KnowledgeBaseEntry.objects.values_list("topic", flat=True))

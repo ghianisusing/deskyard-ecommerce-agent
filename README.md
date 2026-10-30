@@ -2,10 +2,10 @@
 
 A small working store (products, cart, checkout, accounts) with an AI
 support agent that floats on every page. The agent answers general
-questions from a knowledge base, sees the live product catalog, and — if
-the customer is logged in — sees their own real order history, so it can
-answer things like "where's my order" without you writing any lookup code
-by hand.
+questions from a knowledge base, looks up the live product catalog, and,
+if the customer is logged in, looks up their own real order history, so it
+can answer things like "where's my order". It fetches each of these on
+demand with tool calls instead of getting everything in every prompt.
 
 ## Setup
 
@@ -67,11 +67,19 @@ by hand.
 - `agent/models.py` — `KnowledgeBaseEntry`, the general policy facts
   (shipping, returns, payment) the agent can answer from. Manage these
   at `/admin/` too.
-- `agent/views.py` — `chat_api` builds the system prompt fresh on every
-  message from three sources: the knowledge base, the live product
-  catalog, and (if logged in) the customer's own recent orders. It's
-  told explicitly never to invent an order number or status that isn't
-  in that context.
+- `agent/views.py` — `chat_api` sends the customer's message to the
+  model with a short system prompt that lists only the knowledge base
+  topic names. The model then calls tools to fetch what the question
+  needs, and `chat_api` runs them and sends the results back until it
+  answers (at most `MAX_TOOL_ROUNDS` rounds per message). It's told
+  explicitly never to invent an order number or status the tools didn't
+  return.
+- `agent/tools.py` — the tools: `search_products` (price, stock,
+  category), `get_policies` (knowledge base entries by topic), and, for
+  logged-in customers only, `get_my_orders` and `get_order`. Order tools
+  only ever see the customer's own orders; someone else's order number
+  looks the same as one that doesn't exist. Each chat log in `/admin/`
+  records which tools were called.
 - `agent/templates/agent/chat_widget.html` + `chat.js` / `chat.css` — the
   floating chat bubble, included on every store page via `store/base.html`.
 - Escalation: if the agent can't resolve something (or the customer asks
@@ -268,7 +276,8 @@ python manage.py run_chat_evals --list
 Each scenario checks the reply with simple rules (does it escalate, does
 it mention or avoid certain words) and prints PASS or FAIL, with the reply
 for failures. The last line shows tokens, estimated cost and average
-response time; a full run is about 16 model calls and costs well under
+response time; a full run is 16 messages (a few model calls each, since
+the agent looks things up with tools) and costs well under
 a cent with gpt-4o-mini. It needs `OPENAI_API_KEY`, runs in a throwaway
 database (your data and chat logs aren't touched), and switches off
 escalation alerts. Answers vary between runs, so a scenario that fails
@@ -290,8 +299,3 @@ once is worth rerunning before you change anything. It's not part of CI.
   "someone got an email" into an actual workable queue.
 - Let the agent look up an order by number for guests who aren't logged
   in (with some form of identity check, e.g. matching an email).
-- Replace the context-stuffing prompt in `agent/views.py` (which sends
-  the *entire* catalog, knowledge base, and order history on every
-  message) with OpenAI function calling / tool use, so the agent fetches
-  only what a given question actually needs. This matters more as the
-  catalog and knowledge base grow past demo size.

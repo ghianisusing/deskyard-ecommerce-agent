@@ -45,6 +45,8 @@ class ChatLog(models.Model):
     total_tokens = models.PositiveIntegerField(null=True, blank=True)
     latency_ms = models.PositiveIntegerField(null=True, blank=True)
     estimated_cost_usd = models.DecimalField(max_digits=12, decimal_places=8, null=True, blank=True)
+    # Tools the agent called to answer, in order: [{"name": ..., "arguments": ...}].
+    tool_calls = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-timestamp"]
