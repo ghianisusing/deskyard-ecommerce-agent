@@ -12,7 +12,16 @@ class KnowledgeBaseEntryAdmin(admin.ModelAdmin):
 
 @admin.register(ChatLog)
 class ChatLogAdmin(admin.ModelAdmin):
-    list_display = ("timestamp", "user", "escalated", "has_error", "total_tokens", "latency_ms", "cost")
+    list_display = (
+        "timestamp",
+        "user",
+        "escalated",
+        "has_error",
+        "total_tokens",
+        "latency_ms",
+        "cost",
+        "tools_used",
+    )
     list_filter = ("escalated", "model")
     date_hierarchy = "timestamp"
     search_fields = ("message", "reply", "error")
@@ -29,6 +38,7 @@ class ChatLogAdmin(admin.ModelAdmin):
         "total_tokens",
         "latency_ms",
         "estimated_cost_usd",
+        "tool_calls",
     )
 
     @admin.display(boolean=True)
@@ -40,6 +50,10 @@ class ChatLogAdmin(admin.ModelAdmin):
         if obj.estimated_cost_usd is None:
             return "-"
         return f"${obj.estimated_cost_usd:.6f}"
+
+    @admin.display(description="Tools")
+    def tools_used(self, obj):
+        return ", ".join(call.get("name", "?") for call in obj.tool_calls or []) or "-"
 
     def has_add_permission(self, request):
         return False

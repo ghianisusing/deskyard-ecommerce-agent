@@ -14,7 +14,8 @@ from django.urls import reverse
 from store.models import Order, OrderItem, Product
 
 from .models import ChatLog
-from .views import MODEL, build_order_context, parse_agent_reply
+from .tools import get_my_orders
+from .views import MODEL, parse_agent_reply
 
 
 class ParseAgentReplyTests(TestCase):
@@ -50,6 +51,7 @@ class ParseAgentReplyTests(TestCase):
 def _mock_openai_response(content: str):
     mock_message = MagicMock()
     mock_message.content = content
+    mock_message.tool_calls = None
     mock_choice = MagicMock()
     mock_choice.message = mock_message
     mock_response = MagicMock()
@@ -590,8 +592,7 @@ class RateLimitClientIpTests(TestCase):
 
 
 class OrderContextQueryCountTests(TestCase):
-    """The chat builds the customer's order summary on every message, so it
-    must not run extra queries per order or per item."""
+    """The get_my_orders tool must not run extra queries per order or per item."""
 
     def setUp(self):
         self.user = User.objects.create_user(username="gina", password="testpass123")
@@ -608,8 +609,8 @@ class OrderContextQueryCountTests(TestCase):
 
     def _count_queries(self):
         with CaptureQueriesContext(connection) as ctx:
-            context = build_order_context(self.user)
-        return len(ctx.captured_queries), context
+            result = get_my_orders(self.user)
+        return len(ctx.captured_queries), result
 
     def test_query_count_does_not_grow_with_orders_or_items(self):
         self._place_order(self.products[:1])
@@ -617,11 +618,12 @@ class OrderContextQueryCountTests(TestCase):
 
         for _ in range(4):
             self._place_order(self.products)
-        queries, context = self._count_queries()
+        queries, result = self._count_queries()
 
         self.assertEqual(queries, baseline)
-        self.assertIn("2x Lamp 0, 2x Lamp 1, 2x Lamp 2", context)
-        self.assertIn("total $120.00", context)
+        newest = result["orders"][0]
+        self.assertEqual(newest["items"], ["2x Lamp 0", "2x Lamp 1", "2x Lamp 2"])
+        self.assertEqual(newest["total"], "$120.00")
 
 
 def _mock_openai_response_with_usage(content: str, prompt_tokens: int, completion_tokens: int):
@@ -801,7 +803,7 @@ class RunChatEvalsCommandTests(TestCase):
         output = self._call("--scenario", "asks_for_human")
         self.assertIn("PASS  asks_for_human", output)
         self.assertIn("1/1 passed", output)
-        self.assertIn("1 model calls | 1000 tokens", output)
+        self.assertIn("1 messages | 0 tool calls | 1000 tokens", output)
 
     @patch("agent.views.OpenAI")
     def test_failing_scenario_shows_the_reason_and_errors(self, mock_openai_cls, _runner):
@@ -844,3 +846,202 @@ class RunChatEvalsCommandTests(TestCase):
 
         with self.assertRaisesMessage(CommandError, "OPENAI_API_KEY is not set"):
             self._call()
+
+
+class AgentToolTests(TestCase):
+    """The tools the model calls to fetch store data."""
+
+    def setUp(self):
+        from .models import KnowledgeBaseEntry
+
+        KnowledgeBaseEntry.objects.all().delete()
+        KnowledgeBaseEntry.objects.create(topic="Shipping", content="Standard shipping takes 3-5 days.")
+        KnowledgeBaseEntry.objects.create(topic="Returns", content="Returns within 30 days.")
+        Product.objects.all().delete()
+        Product.objects.create(name="Oak Desk Lamp", price=Decimal("39.00"), stock=4, category="lighting")
+        Product.objects.create(name="Monitor Arm", price=Decimal("89.00"), stock=0, category="ergonomics")
+        self.user = User.objects.create_user("tina", password="pw")
+        self.other = User.objects.create_user("omar", password="pw")
+        self.order = Order.objects.create(customer=self.user, status="shipped")
+        self.others_order = Order.objects.create(customer=self.other, status="pending")
+
+    def _run(self, name, arguments, user=None):
+        from .tools import run_tool
+
+        return json.loads(run_tool(user or self.user, name, json.dumps(arguments)))
+
+    def test_search_products_matches_words_and_reports_stock(self):
+        result = self._run("search_products", {"query": "is the desk lamp in stock?"})
+        self.assertEqual(result["products"][0]["name"], "Oak Desk Lamp")
+        self.assertEqual(result["products"][0]["price"], "$39.00")
+        self.assertTrue(result["products"][0]["in_stock"])
+        self.assertNotIn("Monitor Arm", [p["name"] for p in result["products"]])
+
+    def test_search_products_by_category_and_out_of_stock(self):
+        result = self._run("search_products", {"category": "ergonomics"})
+        self.assertEqual([p["name"] for p in result["products"]], ["Monitor Arm"])
+        self.assertFalse(result["products"][0]["in_stock"])
+
+    def test_search_products_caps_results(self):
+        from .tools import MAX_PRODUCT_RESULTS
+
+        for i in range(MAX_PRODUCT_RESULTS + 3):
+            Product.objects.create(name=f"Cable {i}", price=Decimal("5.00"), stock=1)
+        result = self._run("search_products", {})
+        self.assertEqual(len(result["products"]), MAX_PRODUCT_RESULTS)
+        self.assertTrue(result["more_results"])
+
+    def test_get_policies_returns_requested_topics_case_insensitively(self):
+        result = self._run("get_policies", {"topics": ["shipping"]})
+        self.assertEqual(
+            result["entries"], [{"topic": "Shipping", "content": "Standard shipping takes 3-5 days."}]
+        )
+        self.assertNotIn("available_topics", result)
+
+    def test_get_policies_unknown_topic_lists_real_ones(self):
+        result = self._run("get_policies", {"topics": ["Gift wrap"]})
+        self.assertEqual(result["entries"], [])
+        self.assertEqual(result["unknown_topics"], ["Gift wrap"])
+        self.assertEqual(sorted(result["available_topics"]), ["Returns", "Shipping"])
+
+    def test_get_order_only_finds_the_customers_own_orders(self):
+        own = self._run("get_order", {"order_number": self.order.pk})
+        self.assertEqual(own["order"]["status"], "Shipped")
+
+        other = self._run("get_order", {"order_number": self.others_order.pk})
+        self.assertNotIn("order", other)
+        self.assertIn("No order", other["error"])
+
+    def test_get_order_accepts_a_hash_prefix_and_rejects_junk(self):
+        self.assertIn("order", self._run("get_order", {"order_number": f"#{self.order.pk}"}))
+        self.assertIn("error", self._run("get_order", {"order_number": "abc"}))
+
+    def test_get_my_orders_excludes_other_customers(self):
+        result = self._run("get_my_orders", {})
+        self.assertEqual([o["order_number"] for o in result["orders"]], [self.order.pk])
+
+    def test_guests_are_not_offered_order_tools(self):
+        from django.contrib.auth.models import AnonymousUser
+
+        from .tools import tools_for
+
+        guest_tools = {t["function"]["name"] for t in tools_for(AnonymousUser())}
+        self.assertEqual(guest_tools, {"search_products", "get_policies"})
+        result = self._run("get_my_orders", {}, user=AnonymousUser())
+        self.assertIn("Unknown tool", result["error"])
+
+    def test_bad_tool_calls_return_errors_instead_of_raising(self):
+        from .tools import run_tool
+
+        self.assertIn("Unknown tool", self._run("drop_tables", {})["error"])
+        self.assertIn("valid JSON", json.loads(run_tool(self.user, "search_products", "{not json"))["error"])
+        self.assertIn("Wrong arguments", self._run("search_products", {"bogus": 1})["error"])
+
+
+def _mock_tool_call(call_id, name, arguments):
+    call = MagicMock()
+    call.id = call_id
+    call.function.name = name
+    call.function.arguments = json.dumps(arguments)
+    return call
+
+
+def _mock_tool_call_response(*calls, prompt_tokens=100, completion_tokens=10):
+    response = _mock_openai_response_with_usage(None, prompt_tokens, completion_tokens)
+    response.choices[0].message.tool_calls = list(calls)
+    return response
+
+
+@override_settings(
+    OPENAI_API_KEY="test-key",
+    CHAT_RATE_LIMIT_MAX=100,
+    OPENAI_INPUT_PRICE_PER_1M=Decimal("1"),
+    OPENAI_OUTPUT_PRICE_PER_1M=Decimal("1"),
+)
+class ChatToolLoopTests(TestCase):
+    """chat_api runs the tools the model asks for and sends results back."""
+
+    def setUp(self):
+        cache.clear()
+        Product.objects.create(name="Oak Desk Lamp", price=Decimal("39.00"), stock=4)
+
+    def _post(self, message="How much is the desk lamp?"):
+        return self.client.post(
+            reverse("chat_api"),
+            data=json.dumps({"message": message}),
+            content_type="application/json",
+        )
+
+    @patch("agent.views.OpenAI")
+    def test_tool_results_are_sent_back_and_usage_is_summed(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.side_effect = [
+            _mock_tool_call_response(_mock_tool_call("call_1", "search_products", {"query": "desk lamp"})),
+            _mock_openai_response_with_usage("The lamp is $39.00.", 200, 20),
+        ]
+
+        response = self._post()
+
+        self.assertEqual(response.json()["reply"], "The lamp is $39.00.")
+        self.assertEqual(create.call_count, 2)
+        second = create.call_args_list[1].kwargs["messages"]
+        self.assertEqual(second[-2]["tool_calls"][0]["function"]["name"], "search_products")
+        self.assertEqual(second[-1]["role"], "tool")
+        self.assertEqual(second[-1]["tool_call_id"], "call_1")
+        self.assertIn("$39.00", second[-1]["content"])
+
+        log = ChatLog.objects.get()
+        self.assertEqual(log.total_tokens, 330)
+        self.assertEqual(log.estimated_cost_usd, Decimal("0.00033"))
+        self.assertEqual(log.tool_calls, [{"name": "search_products", "arguments": '{"query": "desk lamp"}'}])
+
+    @patch("agent.views.OpenAI")
+    def test_session_history_keeps_only_the_text_exchange(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.side_effect = [
+            _mock_tool_call_response(_mock_tool_call("call_1", "search_products", {"query": "lamp"})),
+            _mock_openai_response("It costs $39.00."),
+        ]
+        self._post()
+        history = self.client.session["chat_history"]
+        self.assertEqual([m["role"] for m in history], ["user", "assistant"])
+
+    @patch("agent.views.OpenAI")
+    def test_tool_rounds_are_capped(self, mock_openai_cls):
+        from .views import MAX_TOOL_ROUNDS
+
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.return_value = _mock_tool_call_response(_mock_tool_call("c", "search_products", {}))
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(create.call_count, MAX_TOOL_ROUNDS + 1)
+        self.assertEqual(create.call_args_list[-1].kwargs["tool_choice"], "none")
+        self.assertEqual(create.call_args_list[0].kwargs["tool_choice"], "auto")
+
+    @patch("agent.views.OpenAI")
+    def test_failure_after_a_tool_round_still_logs_what_was_spent(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.side_effect = [
+            _mock_tool_call_response(_mock_tool_call("c", "search_products", {}), prompt_tokens=50),
+            RuntimeError("boom"),
+        ]
+
+        self.assertEqual(self._post().status_code, 502)
+
+        log = ChatLog.objects.get()
+        self.assertEqual(log.error, "boom")
+        self.assertEqual(log.prompt_tokens, 50)
+        self.assertEqual(len(log.tool_calls), 1)
+
+    @patch("agent.views.OpenAI")
+    def test_prompt_lists_topics_but_not_store_data(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.return_value = _mock_openai_response("Hi!")
+        self._post("hello")
+        system = create.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Shipping", system)  # seeded topic name
+        self.assertNotIn("Oak Desk Lamp", system)
+        self.assertNotIn("3-5 business days", system)
+        self.assertIn("not logged in", system)

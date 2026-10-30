@@ -116,6 +116,9 @@ class Command(BaseCommand):
             if show_replies or not passed:
                 flag = " [escalated]" if reply.escalated else ""
                 self.stdout.write(f"      reply{flag}: {reply.text}")
+                last_log = ChatLog.objects.order_by("-id").first()
+                tools = ", ".join(c.get("name", "?") for c in (last_log.tool_calls if last_log else []))
+                self.stdout.write(f"      tools: {tools or 'none'}")
 
         self._summary(len(scenarios), failed)
         return failed
@@ -126,12 +129,13 @@ class Command(BaseCommand):
         cost = sum((log.estimated_cost_usd or 0 for log in logs), 0)
         latencies = [log.latency_ms for log in logs if log.latency_ms is not None]
         avg_latency = round(sum(latencies) / len(latencies)) if latencies else 0
+        tool_calls = sum(len(log.tool_calls or []) for log in logs)
 
         self.stdout.write("")
         line = f"{total - failed}/{total} passed"
         self.stdout.write(self.style.SUCCESS(line) if not failed else self.style.ERROR(line))
         self.stdout.write(
-            f"{logs.count()} model calls | {tokens} tokens | est. ${cost:.4f} | "
+            f"{logs.count()} messages | {tool_calls} tool calls | {tokens} tokens | est. ${cost:.4f} | "
             f"avg response {avg_latency} ms | model {MODEL}"
         )
 
