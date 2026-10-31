@@ -147,8 +147,14 @@ def _create_eval_data():
     customer = User.objects.create_user("eval_customer", password=None)
     new_customer = User.objects.create_user("eval_new_customer", password=None)
 
-    order = Order.objects.create(customer=customer, status=EVAL_ORDER["status"])
     product = products[EVAL_ORDER["product"]]
+    order = Order.objects.create(
+        customer=customer,
+        status=EVAL_ORDER["status"],
+        payment_status=EVAL_ORDER["payment_status"],
+        total=product.price * EVAL_ORDER["quantity"],
+        **EVAL_ORDER["address"],
+    )
     OrderItem.objects.create(
         order=order,
         product=product,

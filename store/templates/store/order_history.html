@@ -23,6 +23,7 @@
       <span>Order Total</span>
       <span>${{ order.total }}</span>
     </div>
+    {% include "store/order_details.html" %}
   </div>
 {% empty %}
   <div class="empty-state">

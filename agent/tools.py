@@ -86,7 +86,10 @@ def _order_dict(order) -> dict:
         "status": order.get_status_display(),
         "placed": f"{order.created_at:%b %d, %Y}",
         "items": [f"{item.quantity}x {item.product.name}" for item in order.items.all()],
-        "total": f"${order.total()}",
+        "total": f"${order.total}",
+        "payment": order.get_payment_status_display(),
+        # Empty for orders placed before addresses were collected.
+        "ships_to": ", ".join(order.shipping_address_lines()) or "no address on file",
     }
 
 
@@ -159,7 +162,8 @@ GET_POLICIES = _schema(
 
 GET_MY_ORDERS = _schema(
     "get_my_orders",
-    "List the logged-in customer's most recent orders with status, items and total.",
+    "List the logged-in customer's most recent orders with status, items, total, "
+    "payment status and shipping address.",
     {},
 )
 

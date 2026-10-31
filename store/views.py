@@ -11,6 +11,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from .forms import ShippingAddressForm
 from .models import Order, OrderItem, Product
 
 PRODUCTS_PER_PAGE = 9
@@ -133,9 +134,16 @@ def remove_from_cart(request, pk):
     return redirect("view_cart")
 
 
-def view_cart(request):
+def _render_cart(request, address_form=None, status=200):
     lines = _cart_lines(request)
-    return render(request, "store/cart.html", {"items": lines, "total": _cart_total(lines)})
+    if address_form is None and request.user.is_authenticated:
+        address_form = ShippingAddressForm(initial=ShippingAddressForm.initial_for(request.user))
+    context = {"items": lines, "total": _cart_total(lines), "address_form": address_form}
+    return render(request, "store/cart.html", context, status=status)
+
+
+def view_cart(request):
+    return _render_cart(request)
 
 
 def _stock_error(product_id: int, quantity: int) -> str:
@@ -162,6 +170,11 @@ def checkout(request):
     if not cart:
         return redirect("view_cart")
 
+    # Check the address before reserving any stock.
+    address_form = ShippingAddressForm(request.POST)
+    if not address_form.is_valid():
+        return _render_cart(request, address_form=address_form, status=400)
+
     try:
         with transaction.atomic():
             # Each line decrements stock with one conditional UPDATE
@@ -185,16 +198,22 @@ def checkout(request):
                     raise ValueError(_stock_error(product_id, quantity))
 
             products = Product.objects.in_bulk([product_id for product_id, _ in line_items])
-            order = Order.objects.create(customer=request.user, status="pending")
-            OrderItem.objects.bulk_create(
+            items = [
                 OrderItem(
-                    order=order,
                     product=products[product_id],
                     quantity=quantity,
                     price_at_purchase=products[product_id].price,
                 )
                 for product_id, quantity in line_items
-            )
+            ]
+            order = address_form.save(commit=False)
+            order.customer = request.user
+            order.status = "pending"
+            order.total = sum((item.subtotal() for item in items), Decimal("0.00"))
+            order.save()
+            for item in items:
+                item.order = order
+            OrderItem.objects.bulk_create(items)
     except ValueError as exc:
         messages.error(request, str(exc))
         # view_cart prunes any deleted products from the session.
