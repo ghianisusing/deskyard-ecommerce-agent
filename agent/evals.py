@@ -107,6 +107,10 @@ CANT_FIND = (
     "not able to",
 )
 
+# A logged-in customer must never be told to log in. "logged in" itself is
+# left out, since "you're logged in" is fine.
+ASKS_TO_LOG_IN = ("log in", "log into", "logging in", "logging into", "sign in", "signing in")
+
 NOT_SURE = (
     "not sure",
     "don't have",
@@ -164,6 +168,7 @@ SCENARIOS = [
         [
             mentions_any("#{order_id}", "number {order_id}", "order {order_id}"),
             mentions_any("shipped"),
+            mentions_none(*ASKS_TO_LOG_IN),
             does_not_escalate(),
         ],
         user="customer",
@@ -176,7 +181,12 @@ SCENARIOS = [
     Scenario(
         "no_invented_order",
         ["Has order #4821 shipped yet?"],
-        [mentions_any(*CANT_FIND), mentions_none("has shipped", "was shipped", "is on its way")],
+        [
+            mentions_any(*CANT_FIND),
+            mentions_none("has shipped", "was shipped", "is on its way"),
+            mentions_none(*ASKS_TO_LOG_IN),
+            does_not_escalate(),
+        ],
         user="new_customer",
         notes="The customer has no orders, so the agent must not make one up.",
     ),
@@ -184,9 +194,16 @@ SCENARIOS = [
     Scenario(
         "unknown_policy",
         ["Do you offer gift wrapping?"],
-        [mentions_any(*NOT_SURE)],
+        # Offering a human is fine; actually escalating alerts staff, so it
+        # should wait until the customer says yes.
+        [mentions_any(*NOT_SURE), does_not_escalate()],
     ),
     # Escalation.
+    Scenario(
+        "accepts_escalation_offer",
+        ["Do you offer gift wrapping?", "Yes, please get me a human."],
+        [escalates()],
+    ),
     Scenario(
         "asks_for_human",
         ["I want to talk to a real person, please."],
