@@ -31,9 +31,16 @@
 
   <div class="cart-summary" id="cart-summary" style="background:var(--panel); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius);">
     <div class="total"><span>Total</span><span id="cart-total">${{ total }}</span></div>
-    <form action="{% url 'checkout' %}" method="post">
+    <form action="{% url 'checkout' %}" method="post" id="checkout-form">
       {% csrf_token %}
-      <button type="submit" id="checkout-btn" style="width:100%;">Proceed to Checkout</button>
+      {% if address_form %}
+        <h2 class="shipping-heading">Shipping address</h2>
+        {{ address_form.non_field_errors }}
+        {{ address_form.as_p }}
+        <button type="submit" id="checkout-btn" style="width:100%;">Place Order</button>
+      {% else %}
+        <button type="submit" id="checkout-btn" style="width:100%;">Log In to Check Out</button>
+      {% endif %}
     </form>
   </div>
 
