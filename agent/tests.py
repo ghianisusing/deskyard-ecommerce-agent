@@ -1045,3 +1045,24 @@ class ChatToolLoopTests(TestCase):
         self.assertNotIn("Oak Desk Lamp", system)
         self.assertNotIn("3-5 business days", system)
         self.assertIn("not logged in", system)
+
+
+class EvalLogInCheckTests(TestCase):
+    def test_logged_in_order_scenario_fails_a_reply_that_asks_to_log_in(self):
+        """The reply the agent used to give before tool calling: right status,
+        but it told a logged-in customer to log in."""
+        from .evals import SCENARIOS, Reply, run_checks
+
+        scenario = next(s for s in SCENARIOS if s.name == "order_status_logged_in")
+        old_reply = Reply(
+            "You can check your order status by logging into your account and visiting "
+            "'My Orders'. Your order #1 was shipped.",
+            False,
+        )
+        results = run_checks(scenario, old_reply, {"order_id": 1})
+        failed = [r.description for r in results if not r.passed]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("'logging into'", failed[0])
+
+        good_reply = Reply("Your order #1 has shipped.", False)
+        self.assertTrue(all(r.passed for r in run_checks(scenario, good_reply, {"order_id": 1})))

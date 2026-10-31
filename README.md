@@ -276,7 +276,7 @@ python manage.py run_chat_evals --list
 Each scenario checks the reply with simple rules (does it escalate, does
 it mention or avoid certain words) and prints PASS or FAIL, with the reply
 for failures. The last line shows tokens, estimated cost and average
-response time; a full run is 16 messages (a few model calls each, since
+response time; a full run is 18 messages (a few model calls each, since
 the agent looks things up with tools) and costs well under
 a cent with gpt-4o-mini. It needs `OPENAI_API_KEY`, runs in a throwaway
 database (your data and chat logs aren't touched), and switches off

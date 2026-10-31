@@ -63,9 +63,18 @@ Knowledge base topics you can read with get_policies: {topics}.
 
 {account}
 
-If the customer is upset, asks for something the knowledge base says to
-escalate, or explicitly asks for a human, respond with a short apology and
+Escalate to a human, without asking first, when the customer:
+- is upset or angry,
+- reports a damaged, broken or wrong item, or wants a refund for one,
+- asks for a human, or says yes after you offered one,
+- asks for something the knowledge base says to escalate.
+To escalate, reply with a short apology saying a human will follow up, and
 end your reply with exactly this tag on its own line: [ESCALATE]
+
+The tag alerts staff immediately, so use it only in those cases. When you
+just can't answer something, or only mention that a human could help,
+that's an offer: ask if they'd like a human, leave the tag off, and wait
+for their answer.
 """
 
 
