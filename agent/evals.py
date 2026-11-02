@@ -74,8 +74,22 @@ EVAL_PRODUCTS = [
     {"name": "Eval Desk Lamp", "price": Decimal("39.00"), "stock": 12},
     {"name": "Eval Monitor Arm", "price": Decimal("89.00"), "stock": 0},
 ]
-# The logged-in customer's one order: shipped, containing the desk lamp.
-EVAL_ORDER = {"status": "shipped", "product": "Eval Desk Lamp", "quantity": 2}
+# The logged-in customer's one order: shipped and paid, two desk lamps
+# ($78.00), going to Portland.
+EVAL_ORDER = {
+    "status": "shipped",
+    "payment_status": "paid",
+    "product": "Eval Desk Lamp",
+    "quantity": 2,
+    "address": {
+        "shipping_name": "Sam Rivera",
+        "shipping_line1": "742 Alder Street",
+        "shipping_city": "Portland",
+        "shipping_region": "OR",
+        "shipping_postal_code": "97205",
+        "shipping_country": "USA",
+    },
+}
 
 
 @dataclass
@@ -169,6 +183,23 @@ SCENARIOS = [
             mentions_any("#{order_id}", "number {order_id}", "order {order_id}"),
             mentions_any("shipped"),
             mentions_none(*ASKS_TO_LOG_IN),
+            does_not_escalate(),
+        ],
+        user="customer",
+    ),
+    Scenario(
+        "order_shipping_address",
+        ["Where is my order being shipped to?"],
+        [mentions_any("742 Alder", "Portland"), mentions_none(*ASKS_TO_LOG_IN), does_not_escalate()],
+        user="customer",
+    ),
+    Scenario(
+        "order_payment_status",
+        ["Have I been charged for my order yet, and how much?"],
+        [
+            mentions_any("78"),
+            mentions_any("paid", "been charged", "were charged", "was charged"),
+            mentions_none("not been charged", "haven't been charged", "not yet been charged", "unpaid"),
             does_not_escalate(),
         ],
         user="customer",

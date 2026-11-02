@@ -17,6 +17,17 @@ from django.urls import reverse
 
 from .models import Order, OrderItem, Product
 
+# A complete address for checkout posts; checkout rejects an order without one.
+SHIPPING_ADDRESS = {
+    "shipping_name": "Ada Lovelace",
+    "shipping_line1": "12 Analytical Way",
+    "shipping_line2": "",
+    "shipping_city": "London",
+    "shipping_region": "",
+    "shipping_postal_code": "N1 9GU",
+    "shipping_country": "United Kingdom",
+}
+
 
 class CheckoutStockTests(TestCase):
     def setUp(self):
@@ -32,7 +43,7 @@ class CheckoutStockTests(TestCase):
 
     def test_checkout_succeeds_within_stock(self):
         self._add_to_cart(2)
-        self.client.post(reverse("checkout"))
+        self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
 
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 1)
@@ -43,7 +54,7 @@ class CheckoutStockTests(TestCase):
 
     def test_checkout_rejects_overselling(self):
         self._add_to_cart(5)  # only 3 in stock
-        response = self.client.post(reverse("checkout"), follow=True)
+        response = self.client.post(reverse("checkout"), SHIPPING_ADDRESS, follow=True)
 
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 3, "stock must be untouched when checkout fails")
@@ -60,7 +71,7 @@ class CheckoutStockTests(TestCase):
         self.client.post(reverse("add_to_cart", args=[other_product.pk]))
         self.client.post(reverse("add_to_cart", args=[other_product.pk]))  # 2 requested, only 1 in stock
 
-        self.client.post(reverse("checkout"))
+        self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
 
         self.product.refresh_from_db()
         other_product.refresh_from_db()
@@ -96,7 +107,7 @@ class CheckoutRaceConditionTests(TransactionTestCase):
     def _checkout(self, client, barrier, errors, index):
         barrier.wait()  # release both checkouts at the same moment
         try:
-            client.post(reverse("checkout"))
+            client.post(reverse("checkout"), SHIPPING_ADDRESS)
         except OperationalError:
             # SQLite's in-memory test database may refuse a concurrent write
             # (the stock update, or the session save after it) instead of
@@ -147,11 +158,11 @@ class OrderTotalTests(TestCase):
         )
 
         # 2 * 10.00 + 3 * 3.50 = 20.00 + 10.50 = 30.50
-        self.assertEqual(order.total(), Decimal("30.50"))
+        self.assertEqual(order.calculate_total(), Decimal("30.50"))
 
     def test_order_total_is_zero_with_no_items(self):
         order = Order.objects.create(customer=self.user, status="pending")
-        total = order.total()
+        total = order.calculate_total()
         self.assertIsInstance(total, Decimal)
         self.assertEqual(str(total), "0.00")
 
@@ -165,7 +176,7 @@ class OrderTotalTests(TestCase):
         product.price = Decimal("100.00")
         product.save()
 
-        self.assertEqual(order.total(), Decimal("8.00"))
+        self.assertEqual(order.calculate_total(), Decimal("8.00"))
 
 
 class ProductListSearchAndFilterTests(TestCase):
@@ -425,7 +436,7 @@ class DeletedProductInCartTests(TestCase):
         self.assertEqual(self.client.session["cart"], {str(self.kept.pk): 1})
 
     def test_checkout_redirects_with_a_message_instead_of_404(self):
-        response = self.client.post(reverse("checkout"), follow=True)
+        response = self.client.post(reverse("checkout"), SHIPPING_ADDRESS, follow=True)
         self.assertRedirects(response, reverse("view_cart"))
         self.assertContains(response, "no longer available")
         self.assertFalse(Order.objects.exists())
@@ -555,6 +566,8 @@ def _place_order(customer, products, quantity=1):
         OrderItem.objects.create(
             order=order, product=product, quantity=quantity, price_at_purchase=product.price
         )
+    order.total = order.calculate_total()
+    order.save(update_fields=["total"])
     return order
 
 
@@ -596,7 +609,7 @@ class OrderQueryCountTests(TestCase):
             self.client.post(reverse("add_to_cart", args=[product.pk]))
 
         with CaptureQueriesContext(connection) as ctx:
-            response = self.client.post(reverse("checkout"))
+            response = self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
 
         self.assertEqual(response.status_code, 200)
         for product in self.products:
@@ -605,3 +618,140 @@ class OrderQueryCountTests(TestCase):
             q for q in ctx.captured_queries if q["sql"].startswith("SELECT") and "store_orderitem" in q["sql"]
         ]
         self.assertEqual(len(item_selects), 1)
+
+
+class CheckoutOrderRecordTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="grace", password="testpass123")
+        self.client.login(username="grace", password="testpass123")
+        self.lamp = Product.objects.create(name="Lamp", price=Decimal("20.00"), stock=10)
+        self.arm = Product.objects.create(name="Arm", price=Decimal("7.25"), stock=10)
+        self.client.post(reverse("add_to_cart", args=[self.lamp.pk]))
+        self.client.post(reverse("add_to_cart", args=[self.lamp.pk]))
+        self.client.post(reverse("add_to_cart", args=[self.arm.pk]))
+
+    def test_checkout_stores_total_address_and_unpaid_status(self):
+        response = self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
+        self.assertEqual(response.status_code, 200)
+
+        order = Order.objects.get()
+        self.assertEqual(order.total, Decimal("47.25"))
+        self.assertEqual(order.payment_status, "unpaid")
+        for name, value in SHIPPING_ADDRESS.items():
+            self.assertEqual(getattr(order, name), value)
+        self.assertContains(response, "12 Analytical Way")
+        self.assertContains(response, "Unpaid")
+
+    def test_total_does_not_change_when_prices_change_later(self):
+        self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
+        self.lamp.price = Decimal("99.00")
+        self.lamp.save()
+        self.assertEqual(Order.objects.get().total, Decimal("47.25"))
+
+    def test_missing_address_fields_reject_the_order_without_touching_stock(self):
+        incomplete = {**SHIPPING_ADDRESS, "shipping_line1": "", "shipping_city": "   "}
+        response = self.client.post(reverse("checkout"), incomplete)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Order.objects.exists())
+        self.lamp.refresh_from_db()
+        self.assertEqual(self.lamp.stock, 10)
+        self.assertEqual(self.client.session["cart"], {str(self.lamp.pk): 2, str(self.arm.pk): 1})
+        # The cart page comes back with the errors and what was typed.
+        self.assertContains(response, "This field is required.", count=2, status_code=400)
+        self.assertContains(response, 'value="Ada Lovelace"', status_code=400)
+
+    def test_optional_address_fields_can_be_blank(self):
+        self.client.post(
+            reverse("checkout"), {**SHIPPING_ADDRESS, "shipping_line2": "", "shipping_region": ""}
+        )
+        self.assertTrue(Order.objects.exists())
+
+    def test_cart_prefills_the_last_address_used(self):
+        self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
+        self.client.post(reverse("add_to_cart", args=[self.arm.pk]))
+        response = self.client.get(reverse("view_cart"))
+        self.assertContains(response, 'value="12 Analytical Way"')
+
+    def test_guest_sees_a_log_in_button_instead_of_the_address_form(self):
+        guest = Client()
+        guest.post(reverse("add_to_cart", args=[self.lamp.pk]))
+        response = guest.get(reverse("view_cart"))
+        self.assertContains(response, "Log In to Check Out")
+        self.assertNotContains(response, "shipping_line1")
+
+    def test_order_pages_show_payment_and_address(self):
+        self.client.post(reverse("checkout"), SHIPPING_ADDRESS)
+        order = Order.objects.get()
+        order.payment_status = "paid"
+        order.save()
+        response = self.client.get(reverse("order_history"))
+        self.assertContains(response, "Paid")
+        self.assertContains(response, "London N1 9GU")
+        self.assertContains(response, "$47.25")
+
+
+class OrderAddressDisplayTests(TestCase):
+    def test_address_lines_skip_empty_parts(self):
+        order = Order(**SHIPPING_ADDRESS)
+        self.assertEqual(
+            order.shipping_address_lines(),
+            ["Ada Lovelace", "12 Analytical Way", "London N1 9GU", "United Kingdom"],
+        )
+        order.shipping_region = "Greater London"
+        self.assertIn("London, Greater London N1 9GU", order.shipping_address_lines())
+
+    def test_older_orders_without_an_address_say_so(self):
+        user = User.objects.create_user(username="old", password="testpass123")
+        order = _place_order(user, [Product.objects.create(name="Mug", price=Decimal("5.00"), stock=3)])
+        self.assertEqual(order.shipping_address_lines(), [])
+        self.client.login(username="old", password="testpass123")
+        self.assertContains(self.client.get(reverse("order_history")), "No address on file")
+
+
+class OrderRecordsMigrationTests(TransactionTestCase):
+    """The 0007 migration fills in totals and payment status for orders
+    placed before those fields existed."""
+
+    def test_backfill(self):
+        from django.db.migrations.executor import MigrationExecutor
+
+        before = [("store", "0006_alter_order_id_alter_orderitem_id_alter_product_id")]
+        after = [("store", "0007_order_records")]
+        executor = MigrationExecutor(connection)
+        executor.migrate(before)
+        old_apps = executor.loader.project_state(before).apps
+
+        OldUser = old_apps.get_model("auth", "User")
+        OldProduct = old_apps.get_model("store", "Product")
+        OldOrder = old_apps.get_model("store", "Order")
+        OldOrderItem = old_apps.get_model("store", "OrderItem")
+        user = OldUser.objects.create(username="legacy")
+        product = OldProduct.objects.create(name="Desk", price=Decimal("150.00"), stock=5)
+        shipped = OldOrder.objects.create(customer=user, status="shipped")
+        pending = OldOrder.objects.create(customer=user, status="pending")
+        OldOrderItem.objects.create(
+            order=shipped, product=product, quantity=2, price_at_purchase=Decimal("140.00")
+        )
+        OldOrderItem.objects.create(
+            order=pending, product=product, quantity=1, price_at_purchase=Decimal("150.00")
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(after)
+        new_apps = executor.loader.project_state(after).apps
+        NewOrder = new_apps.get_model("store", "Order")
+
+        shipped = NewOrder.objects.get(pk=shipped.pk)
+        pending = NewOrder.objects.get(pk=pending.pk)
+        self.assertEqual(shipped.total, Decimal("280.00"))
+        self.assertEqual(shipped.payment_status, "paid")
+        self.assertEqual(pending.total, Decimal("150.00"))
+        self.assertEqual(pending.payment_status, "unpaid")
+        self.assertEqual(shipped.shipping_line1, "")
+
+        # Leave the database fully migrated for the tests that follow.
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())

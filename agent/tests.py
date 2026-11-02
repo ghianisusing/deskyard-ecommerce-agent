@@ -606,6 +606,8 @@ class OrderContextQueryCountTests(TestCase):
             OrderItem.objects.create(
                 order=order, product=product, quantity=2, price_at_purchase=product.price
             )
+        order.total = order.calculate_total()
+        order.save(update_fields=["total"])
 
     def _count_queries(self):
         with CaptureQueriesContext(connection) as ctx:
@@ -1066,3 +1068,33 @@ class EvalLogInCheckTests(TestCase):
 
         good_reply = Reply("Your order #1 has shipped.", False)
         self.assertTrue(all(r.passed for r in run_checks(scenario, good_reply, {"order_id": 1})))
+
+
+class OrderToolDetailsTests(TestCase):
+    def test_order_lookup_includes_payment_and_address(self):
+        from .tools import get_order
+
+        user = User.objects.create_user(username="ivy", password="testpass123")
+        order = Order.objects.create(
+            customer=user,
+            status="shipped",
+            payment_status="paid",
+            total=Decimal("39.00"),
+            shipping_name="Ivy Chen",
+            shipping_line1="1 Main St",
+            shipping_city="Austin",
+            shipping_region="TX",
+            shipping_postal_code="78701",
+            shipping_country="USA",
+        )
+        result = get_order(user, order.pk)["order"]
+        self.assertEqual(result["total"], "$39.00")
+        self.assertEqual(result["payment"], "Paid")
+        self.assertEqual(result["ships_to"], "Ivy Chen, 1 Main St, Austin, TX 78701, USA")
+
+    def test_order_without_an_address_says_so(self):
+        from .tools import get_order
+
+        user = User.objects.create_user(username="old", password="testpass123")
+        order = Order.objects.create(customer=user)
+        self.assertEqual(get_order(user, order.pk)["order"]["ships_to"], "no address on file")

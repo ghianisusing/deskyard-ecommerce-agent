@@ -160,6 +160,14 @@ no template changes needed either way.
   (`Product.image`). Falls back to the wireframe icon when unset. Stored
   under `media/` locally (gitignored) — served by Django only in
   `DEBUG` mode; swap for real object storage (S3, etc.) before deploying.
+- **Orders** — checkout asks for a shipping address (pre-filled from the
+  customer's last order) and stores the order total, so later price
+  changes never alter it. Each order has a payment status (unpaid, paid,
+  refunded) separate from its shipping status; staff set it in `/admin/`.
+  Orders from before this change keep a blank address, and the migration
+  fills in their totals and marks shipped or delivered ones as paid. The
+  chat agent can tell customers where an order is going and whether
+  they've been charged.
 
 ## Recent hardening
 
@@ -291,7 +299,8 @@ once is worth rerunning before you change anything. It's not part of CI.
   `select_for_update()` checkout locking, which is currently a no-op on
   SQLite.
 - Add real payment processing at checkout (currently it just creates the
-  order — no payment is actually taken).
+  order — no payment is actually taken). The order's `payment_status` is
+  where a payment provider's result should be recorded.
 - Escalations notify a human now, but there's still no ticket/queue to
   work from — just an inbox or Slack channel. A `claimed_by` /
   `resolved_at` field (or a small dedicated `EscalationTicket` model)

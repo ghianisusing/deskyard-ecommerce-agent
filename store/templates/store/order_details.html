@@ -1,0 +1,13 @@
+{# Payment status and shipping address for one order. Expects `order`. #}
+<dl class="order-details">
+  <div>
+    <dt>Payment</dt>
+    <dd><span class="badge payment-{{ order.payment_status }}">{{ order.get_payment_status_display }}</span></dd>
+  </div>
+  <div>
+    <dt>Ships to</dt>
+    <dd>
+      {% for line in order.shipping_address_lines %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% empty %}<span class="muted">No address on file</span>{% endfor %}
+    </dd>
+  </div>
+</dl>
