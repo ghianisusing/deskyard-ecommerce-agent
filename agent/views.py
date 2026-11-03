@@ -3,14 +3,17 @@ import logging
 import os
 from decimal import Decimal
 from time import monotonic
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.core.cache import cache
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from openai import OpenAI
 
 from .knowledge_base import knowledge_base_topics
 from .models import ChatLog
+from .streaming import EscalationTagFilter
+from .streaming import event as streaming_event
 from .tools import run_tool, tools_for
 
 logger = logging.getLogger(__name__)
@@ -231,52 +234,59 @@ def _log_chat(request, message: str, reply: str = "", escalated: bool = False, e
     )
 
 
-def chat_api(request):
-    """Take a user message + history, return the agent's reply."""
+GENERIC_CHAT_ERROR = "Sorry, the assistant is having trouble right now. Please try again in a moment."
+
+
+def _prepare_chat(request):
+    """Checks shared by both chat endpoints. Returns (error_response, None)
+    or (None, chat) where chat holds the message, history and prompt."""
     if request.method != "POST":
-        return JsonResponse({"error": "POST only"}, status=405)
+        return JsonResponse({"error": "POST only"}, status=405), None
 
     if _is_rate_limited(request):
-        return JsonResponse(
-            {
-                "error": (
-                    f"You're sending messages too quickly. Please wait a "
-                    f"moment and try again (limit: {settings.CHAT_RATE_LIMIT_MAX} "
-                    f"messages per {settings.CHAT_RATE_LIMIT_WINDOW}s)."
-                )
-            },
-            status=429,
+        return (
+            JsonResponse(
+                {
+                    "error": (
+                        f"You're sending messages too quickly. Please wait a "
+                        f"moment and try again (limit: {settings.CHAT_RATE_LIMIT_MAX} "
+                        f"messages per {settings.CHAT_RATE_LIMIT_WINDOW}s)."
+                    )
+                },
+                status=429,
+            ),
+            None,
         )
 
     try:
         body = json.loads(request.body)
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return JsonResponse({"error": "Invalid JSON"}, status=400), None
     if not isinstance(body, dict):
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return JsonResponse({"error": "Invalid JSON"}, status=400), None
 
     raw_message = body.get("message")
     user_message = raw_message.strip() if isinstance(raw_message, str) else ""
 
     if not user_message:
-        return JsonResponse({"error": "Empty message"}, status=400)
+        return JsonResponse({"error": "Empty message"}, status=400), None
 
     if len(user_message) > settings.CHAT_MESSAGE_MAX_CHARS:
-        return JsonResponse(
-            {
-                "error": (
-                    f"That message is too long. Please keep it under "
-                    f"{settings.CHAT_MESSAGE_MAX_CHARS} characters."
-                )
-            },
-            status=400,
+        return (
+            JsonResponse(
+                {
+                    "error": (
+                        f"That message is too long. Please keep it under "
+                        f"{settings.CHAT_MESSAGE_MAX_CHARS} characters."
+                    )
+                },
+                status=400,
+            ),
+            None,
         )
 
     if not settings.OPENAI_API_KEY:
-        return JsonResponse(
-            {"error": "Server is missing OPENAI_API_KEY. See README."},
-            status=500,
-        )
+        return JsonResponse({"error": "Server is missing OPENAI_API_KEY. See README."}, status=500), None
 
     # Conversation history lives in the session, not the request body, so
     # a client can't inflate token cost with a huge history or forge
@@ -296,42 +306,57 @@ def chat_api(request):
     messages = [{"role": "system", "content": build_system_prompt(request)}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
+    return None, {
+        "message": user_message,
+        "history": history,
+        "max_entries": max_entries,
+        "messages": messages,
+    }
+
+
+def _remember_turn(request, chat: dict, reply_text: str) -> None:
+    history = chat["history"] + [
+        {"role": "user", "content": chat["message"]},
+        {"role": "assistant", "content": reply_text},
+    ]
+    request.session[CHAT_HISTORY_SESSION_KEY] = history[-chat["max_entries"] :]
+
+
+def _log_failure(request, chat: dict, started: float, error: str, responses: list, tool_calls: list) -> None:
+    # Time to failure includes retries, which shows when OpenAI is slow
+    # rather than down. Rounds that finished before the failure still cost.
+    _log_chat(
+        request,
+        chat["message"],
+        error=error,
+        model=MODEL,
+        latency_ms=round((monotonic() - started) * 1000),
+        tool_calls=tool_calls,
+        **(_usage_fields(responses) if responses else {}),
+    )
+
+
+def chat_api(request):
+    """Take a user message, return the agent's whole reply as JSON. The
+    widget streams from chat_stream_api instead and falls back to this."""
+    error_response, chat = _prepare_chat(request)
+    if error_response:
+        return error_response
 
     started = monotonic()
     try:
-        reply_text, responses, tool_calls = _answer_with_tools(request, messages)
+        reply_text, responses, tool_calls = _answer_with_tools(request, chat["messages"])
     except _ToolLoopError as exc:
         logger.exception("Chat completion failed")
-        # Time to failure includes retries, which shows when OpenAI is slow
-        # rather than down. Rounds that finished before the failure still cost.
-        latency_ms = round((monotonic() - started) * 1000)
-        usage = _usage_fields(exc.responses) if exc.responses else {}
-        _log_chat(
-            request,
-            user_message,
-            error=str(exc),
-            model=MODEL,
-            latency_ms=latency_ms,
-            tool_calls=exc.tool_calls,
-            **usage,
-        )
-        return JsonResponse(
-            {"error": "Sorry, the assistant is having trouble right now. Please try again in a moment."},
-            status=502,
-        )
+        _log_failure(request, chat, started, str(exc), exc.responses, exc.tool_calls)
+        return JsonResponse({"error": GENERIC_CHAT_ERROR}, status=502)
 
     latency_ms = round((monotonic() - started) * 1000)
     reply_text, escalate = parse_agent_reply(reply_text)
-
-    history = history + [
-        {"role": "user", "content": user_message},
-        {"role": "assistant", "content": reply_text},
-    ]
-    request.session[CHAT_HISTORY_SESSION_KEY] = history[-max_entries:]
-
+    _remember_turn(request, chat, reply_text)
     _log_chat(
         request,
-        user_message,
+        chat["message"],
         reply=reply_text,
         escalated=escalate,
         model=MODEL,
@@ -339,8 +364,161 @@ def chat_api(request):
         tool_calls=tool_calls,
         **_usage_fields(responses),
     )
-
     return JsonResponse({"reply": reply_text, "escalate": escalate})
+
+
+class _StreamState:
+    """What a streamed answer has produced so far, for logging."""
+
+    def __init__(self):
+        self.responses = []  # one per model call, each with .usage (or None)
+        self.tool_calls = []
+        self.reply = ""
+
+
+def _stream_answer_with_tools(request, messages: list, state: _StreamState):
+    """Like _answer_with_tools, but every model call is streamed and the
+    reply text is yielded piece by piece as it arrives. Tool-call rounds
+    rarely produce text; if one does, the final "done" event replaces it.
+    """
+    try:
+        client = _openai_client()
+    except Exception as exc:  # noqa: BLE001 - handled by chat_stream_api
+        raise _ToolLoopError(exc, state.responses, state.tool_calls) from exc
+    tools = tools_for(request.user)
+    messages = list(messages)
+
+    for round_number in range(MAX_TOOL_ROUNDS + 1):
+        last_round = round_number == MAX_TOOL_ROUNDS
+        usage_holder = SimpleNamespace(usage=None)
+        state.responses.append(usage_holder)
+        text_parts, calls = [], {}
+        try:
+            stream = client.chat.completions.create(
+                model=MODEL,
+                messages=list(messages),
+                max_tokens=500,
+                tools=tools,
+                tool_choice="none" if last_round else "auto",
+                stream=True,
+                # Sends token usage in a final chunk, for the chat log.
+                stream_options={"include_usage": True},
+            )
+            for chunk in stream:
+                if getattr(chunk, "usage", None) is not None:
+                    usage_holder.usage = chunk.usage
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    text_parts.append(delta.content)
+                    yield delta.content
+                # Tool calls arrive in fragments, keyed by index.
+                for fragment in delta.tool_calls or []:
+                    call = calls.setdefault(fragment.index, {"id": "", "name": "", "arguments": ""})
+                    if fragment.id:
+                        call["id"] = fragment.id
+                    if fragment.function and fragment.function.name:
+                        call["name"] += fragment.function.name
+                    if fragment.function and fragment.function.arguments:
+                        call["arguments"] += fragment.function.arguments
+        except Exception as exc:  # noqa: BLE001 - handled by chat_stream_api
+            raise _ToolLoopError(exc, state.responses, state.tool_calls) from exc
+
+        if not calls or last_round:
+            state.reply = "".join(text_parts)
+            return
+
+        ordered = [calls[index] for index in sorted(calls)]
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "".join(text_parts) or None,
+                "tool_calls": [
+                    {
+                        "id": call["id"],
+                        "type": "function",
+                        "function": {"name": call["name"], "arguments": call["arguments"]},
+                    }
+                    for call in ordered
+                ],
+            }
+        )
+        for call in ordered:
+            state.tool_calls.append({"name": call["name"], "arguments": call["arguments"]})
+            result = run_tool(request.user, call["name"], call["arguments"])
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+
+
+def chat_stream_api(request):
+    """Same as chat_api, but streams the reply as it's written, as
+    newline-delimited JSON events (see agent/streaming.py).
+
+    Request errors (rate limit, bad input) still come back as plain JSON
+    with an error status, before any streaming starts.
+    """
+    error_response, chat = _prepare_chat(request)
+    if error_response:
+        return error_response
+
+    # The session middleware saves the session and sets its cookie before
+    # the stream runs, so a brand-new session needs its key now; the
+    # stream then saves the updated history itself.
+    if not request.session.session_key:
+        request.session.save()
+    request.session.modified = True
+
+    def events():
+        started = monotonic()
+        state = _StreamState()
+        tag_filter = EscalationTagFilter()
+        try:
+            for piece in _stream_answer_with_tools(request, chat["messages"], state):
+                text = tag_filter.feed(piece)
+                if text:
+                    yield streaming_event("delta", text=text)
+        except _ToolLoopError as exc:
+            logger.exception("Streaming chat completion failed")
+            _log_failure(request, chat, started, str(exc), exc.responses, exc.tool_calls)
+            yield streaming_event("error", error=GENERIC_CHAT_ERROR)
+            return
+        except GeneratorExit:
+            # The browser went away mid-reply; record what it cost anyway.
+            _log_failure(
+                request,
+                chat,
+                started,
+                "Client disconnected before the reply finished.",
+                state.responses,
+                state.tool_calls,
+            )
+            raise
+
+        rest = tag_filter.flush()
+        if rest:
+            yield streaming_event("delta", text=rest)
+
+        latency_ms = round((monotonic() - started) * 1000)
+        reply_text, escalate = parse_agent_reply(state.reply)
+        _remember_turn(request, chat, reply_text)
+        request.session.save()
+        _log_chat(
+            request,
+            chat["message"],
+            reply=reply_text,
+            escalated=escalate,
+            model=MODEL,
+            latency_ms=latency_ms,
+            tool_calls=state.tool_calls,
+            **_usage_fields(state.responses),
+        )
+        yield streaming_event("done", reply=reply_text, escalate=escalate)
+
+    response = StreamingHttpResponse(events(), content_type="application/x-ndjson")
+    # Stop proxies (and browsers) from holding the stream back.
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 def tts_api(request):

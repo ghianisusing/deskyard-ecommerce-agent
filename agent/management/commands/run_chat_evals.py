@@ -7,6 +7,7 @@ throwaway test database; your data and chat logs aren't touched, and
 escalation alerts are switched off for the run.
 """
 
+import json
 import sys
 
 from django.conf import settings
@@ -36,6 +37,11 @@ class Command(BaseCommand):
         parser.add_argument("--list", action="store_true", help="List scenario names and exit.")
         parser.add_argument(
             "--show-replies", action="store_true", help="Print every reply, not only failing ones."
+        )
+        parser.add_argument(
+            "--stream",
+            action="store_true",
+            help="Use the streaming endpoint the chat widget uses, and fail if the escalation tag leaks.",
         )
 
     def handle(self, *args, **options):
@@ -68,7 +74,7 @@ class Command(BaseCommand):
                 SUPPORT_NOTIFICATION_EMAIL="",
                 CHAT_RATE_LIMIT_MAX=10_000,
             ):
-                failed = self._run(scenarios, options["show_replies"])
+                failed = self._run(scenarios, options["show_replies"], options["stream"])
         finally:
             runner.teardown_databases(old_config)
             runner.teardown_test_environment()
@@ -76,7 +82,7 @@ class Command(BaseCommand):
         if failed:
             raise CommandError(f"{failed} of {len(scenarios)} scenario(s) failed.")
 
-    def _run(self, scenarios, show_replies: bool) -> int:
+    def _run(self, scenarios, show_replies: bool, stream: bool = False) -> int:
         users, context = _create_eval_data()
         failed = 0
 
@@ -87,14 +93,9 @@ class Command(BaseCommand):
 
             reply, error = None, ""
             for index, message in enumerate(scenario.messages):
-                response = client.post(
-                    reverse("chat_api"),
-                    data={"message": message.format(**context), "new_conversation": index == 0},
-                    content_type="application/json",
-                )
-                data = response.json()
-                if response.status_code != 200:
-                    error = f"HTTP {response.status_code}: {data.get('error', '')}"
+                payload = {"message": message.format(**context), "new_conversation": index == 0}
+                data, error = _post_chat(client, payload, stream)
+                if error:
                     break
                 reply = Reply(text=data["reply"], escalated=data["escalate"])
 
@@ -138,6 +139,29 @@ class Command(BaseCommand):
             f"{logs.count()} messages | {tool_calls} tool calls | {tokens} tokens | est. ${cost:.4f} | "
             f"avg response {avg_latency} ms | model {MODEL}"
         )
+
+
+def _post_chat(client, payload: dict, stream: bool) -> tuple[dict, str]:
+    """Send one message. Returns ({"reply", "escalate"}, "") or ({}, error)."""
+    url = reverse("chat_stream_api" if stream else "chat_api")
+    response = client.post(url, data=payload, content_type="application/json")
+    if not response.streaming:
+        data = response.json()
+        if response.status_code != 200:
+            return {}, f"HTTP {response.status_code}: {data.get('error', '')}"
+        return data, ""
+
+    raw = b"".join(response.streaming_content).decode()
+    events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    streamed = "".join(e["text"] for e in events if e["type"] == "delta")
+    if "[ESC" in streamed or "ALATE]" in streamed:
+        return {}, "escalation tag appeared in the streamed text"
+    final = events[-1] if events else {}
+    if final.get("type") == "error":
+        return {}, f"stream error: {final.get('error', '')}"
+    if final.get("type") != "done":
+        return {}, "stream ended without a final reply"
+    return final, ""
 
 
 def _create_eval_data():

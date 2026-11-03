@@ -156,6 +156,66 @@ function setVoiceStatus(text) {
   if (floatingStatusText) floatingStatusText.textContent = text;
 }
 
+// Turns a non-streaming /api/chat/ response (or a pre-stream error from
+// /api/chat/stream/, which uses the same JSON shape) into a result.
+async function readJsonResult(res) {
+  try {
+    const data = await res.json();
+    return data.error ? { error: data.error } : { reply: data.reply, escalate: data.escalate };
+  } catch {
+    return { error: `Server error (status ${res.status}). Check the terminal running runserver.` };
+  }
+}
+
+// Asks for the whole reply at once. Used only when streaming can't start.
+async function requestReplyOnce(body) {
+  const res = await fetch("/api/chat/", { method: "POST", headers: jsonHeaders, body });
+  return readJsonResult(res);
+}
+
+// Streams the reply from /api/chat/stream/, calling onDelta with each new
+// piece of text, and resolves to { reply, escalate } or { error }. The
+// "done" event's reply is the final text (with the escalation tag already
+// removed on the server). Falls back to the plain endpoint only when the
+// stream never started, so a question is never sent (and billed) twice.
+async function requestReply(text, onDelta) {
+  const body = JSON.stringify({ message: text, new_conversation: newConversation });
+
+  let res;
+  try {
+    res = await fetch("/api/chat/stream/", { method: "POST", headers: jsonHeaders, body });
+  } catch {
+    return requestReplyOnce(body);
+  }
+  if (res.status === 404 || !res.body) return requestReplyOnce(body);
+
+  const isStream = (res.headers.get("Content-Type") || "").includes("application/x-ndjson");
+  if (!res.ok || !isStream) return readJsonResult(res);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      const lines = buffered.split("\n");
+      buffered = lines.pop(); // the last piece may be an incomplete line
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === "delta") onDelta(event.text);
+        else if (event.type === "done") return { reply: event.reply, escalate: event.escalate };
+        else if (event.type === "error") return { error: event.error };
+      }
+    }
+  } catch {
+    // Connection dropped or a garbled line; reported below.
+  }
+  return { error: "The reply was cut off. Please try again." };
+}
+
 // Shared by both the typed-message form and voice call mode, so the
 // request/response/error handling only lives in one place. speakReply
 // controls whether the response is read aloud (voice mode) and whether
@@ -175,38 +235,45 @@ async function sendToAgent(text, { speakReply = false } = {}) {
     if (voiceActive) listenOnce();
   };
 
-  try {
-    const res = await fetch("/api/chat/", {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ message: text, new_conversation: newConversation }),
-    });
+  // The reply bubble appears with the first streamed words, replacing the
+  // typing indicator, and grows as more arrive.
+  let bubble = null;
+  const onDelta = (chunk) => {
+    if (!bubble) {
+      typingEl.remove();
+      bubble = addMessage("", "agent", "happy");
+    }
+    bubble.textContent += chunk;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
 
+  try {
+    let result;
+    try {
+      result = await requestReply(text, onDelta);
+    } catch (err) {
+      result = { error: `Couldn't reach the server: ${err.message}` };
+    }
     typingEl.remove();
 
-    let data;
-    try {
-      data = await res.json();
-    } catch {
-      const msg = `Server error (status ${res.status}). Check the terminal running runserver.`;
-      addMessage(msg, "system");
+    if (result.error) {
+      // Drop a half-written reply rather than leave it looking finished.
+      if (bubble) (bubble.closest(".msg-row") || bubble).remove();
+      addMessage(result.error, "system");
       setDeskieState("concerned", 2000);
-      if (speakReply) speak(msg, finishVoiceTurn);
+      if (speakReply) speak(result.error, finishVoiceTurn);
       return;
     }
 
-    if (data.error) {
-      addMessage(data.error, "system");
-      setDeskieState("concerned", 2000);
-      if (speakReply) speak(data.error, finishVoiceTurn);
-      return;
+    if (bubble) {
+      bubble.textContent = result.reply;
+    } else {
+      addMessage(result.reply, "agent", "happy");
     }
-
-    addMessage(data.reply, "agent", "happy");
     newConversation = false;
 
     const afterReply = () => {
-      if (data.escalate) {
+      if (result.escalate) {
         addMessage("🔔 This conversation has been flagged for a human agent to follow up.", "system");
         setDeskieState("concerned", 2000);
       } else if (!speakReply) {
@@ -215,17 +282,14 @@ async function sendToAgent(text, { speakReply = false } = {}) {
       finishVoiceTurn();
     };
 
+    // Voice replies are spoken once the whole reply is in: it arrives a
+    // fraction of a second after the first sentence, and speaking it in
+    // pieces would spend extra /api/tts/ calls against the shared rate limit.
     if (speakReply) {
-      speak(data.reply, afterReply);
+      speak(result.reply, afterReply);
     } else {
       afterReply();
     }
-  } catch (err) {
-    typingEl.remove();
-    const msg = `Couldn't reach the server: ${err.message}`;
-    addMessage(msg, "system");
-    setDeskieState("concerned", 2000);
-    if (speakReply) speak(msg, finishVoiceTurn);
   } finally {
     isSending = false;
     sendBtn.disabled = false;
