@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
@@ -1098,3 +1099,207 @@ class OrderToolDetailsTests(TestCase):
         user = User.objects.create_user(username="old", password="testpass123")
         order = Order.objects.create(customer=user)
         self.assertEqual(get_order(user, order.pk)["order"]["ships_to"], "no address on file")
+
+
+class EscalationTagFilterTests(TestCase):
+    def _run(self, pieces):
+        from .streaming import EscalationTagFilter
+
+        tag_filter = EscalationTagFilter()
+        out = [tag_filter.feed(piece) for piece in pieces]
+        out.append(tag_filter.flush())
+        return "".join(out), out, tag_filter.escalated
+
+    def test_plain_text_passes_through(self):
+        text, _, escalated = self._run(["Hello ", "there."])
+        self.assertEqual(text, "Hello there.")
+        self.assertFalse(escalated)
+
+    def test_tag_split_across_pieces_is_removed_and_never_emitted(self):
+        text, pieces, escalated = self._run(["Sorry about that.\n[ESC", "ALA", "TE]"])
+        self.assertEqual(text, "Sorry about that.\n")
+        self.assertTrue(escalated)
+        self.assertFalse(any("[" in piece for piece in pieces))
+
+    def test_bracket_that_is_not_the_tag_is_released(self):
+        text, _, escalated = self._run(["Press [E", "nter] to continue ["])
+        self.assertEqual(text, "Press [Enter] to continue [")
+        self.assertFalse(escalated)
+
+
+def _stream_chunk(content=None, tool_calls=None):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=tool_calls))], usage=None
+    )
+
+
+def _usage_chunk(prompt_tokens, completion_tokens):
+    usage = SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+    return SimpleNamespace(choices=[], usage=usage)
+
+
+def _tool_fragment(index, call_id=None, name=None, arguments=None):
+    return SimpleNamespace(index=index, id=call_id, function=SimpleNamespace(name=name, arguments=arguments))
+
+
+@override_settings(
+    OPENAI_API_KEY="test-key",
+    CHAT_RATE_LIMIT_MAX=100,
+    OPENAI_INPUT_PRICE_PER_1M=Decimal("0.15"),
+    OPENAI_OUTPUT_PRICE_PER_1M=Decimal("0.60"),
+)
+class ChatStreamApiTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def _post(self, client=None, **body):
+        client = client or self.client
+        response = client.post(
+            reverse("chat_stream_api"),
+            data=json.dumps({"message": "hello", **body}),
+            content_type="application/json",
+        )
+        events = []
+        if response.streaming:
+            raw = b"".join(response.streaming_content).decode()
+            events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        return response, events
+
+    @patch("agent.views.OpenAI")
+    def test_streams_text_then_done_and_logs_usage(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.return_value = iter(
+            [_stream_chunk("Standard shipping "), _stream_chunk("takes 3-5 days."), _usage_chunk(1000, 200)]
+        )
+
+        response, events = self._post(new_conversation=True)
+
+        self.assertEqual(response["Content-Type"], "application/x-ndjson")
+        self.assertEqual(
+            events,
+            [
+                {"type": "delta", "text": "Standard shipping "},
+                {"type": "delta", "text": "takes 3-5 days."},
+                {"type": "done", "reply": "Standard shipping takes 3-5 days.", "escalate": False},
+            ],
+        )
+        self.assertTrue(create.call_args.kwargs["stream"])
+        log = ChatLog.objects.get()
+        self.assertEqual(log.reply, "Standard shipping takes 3-5 days.")
+        self.assertEqual(log.total_tokens, 1200)
+        self.assertEqual(log.estimated_cost_usd, Decimal("0.00027"))
+
+    @patch("agent.views.OpenAI")
+    def test_history_is_kept_for_the_next_message(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.side_effect = [iter([_stream_chunk("First answer.")]), iter([_stream_chunk("Second answer.")])]
+
+        guest = Client()
+        self._post(guest, message="first question", new_conversation=True)
+        self._post(guest, message="second question")
+
+        sent = [m["content"] for m in create.call_args_list[1].kwargs["messages"]]
+        self.assertIn("first question", sent)
+        self.assertIn("First answer.", sent)
+
+    @patch("agent.views.OpenAI")
+    def test_escalation_tag_is_hidden_from_the_stream(self, mock_openai_cls):
+        mock_openai_cls.return_value.chat.completions.create.return_value = iter(
+            [_stream_chunk("Sorry, a human will follow up.\n[ESC"), _stream_chunk("ALATE]")]
+        )
+
+        _, events = self._post()
+
+        streamed = "".join(e["text"] for e in events if e["type"] == "delta")
+        self.assertNotIn("[", streamed)
+        self.assertEqual(
+            events[-1], {"type": "done", "reply": "Sorry, a human will follow up.", "escalate": True}
+        )
+        self.assertTrue(ChatLog.objects.get().escalated)
+
+    @patch("agent.views.OpenAI")
+    def test_tool_call_fragments_are_joined_and_run(self, mock_openai_cls):
+        Product.objects.create(name="Desk Lamp", price=Decimal("39.00"), stock=4)
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.side_effect = [
+            iter(
+                [
+                    _stream_chunk(tool_calls=[_tool_fragment(0, "call_1", "search_products", '{"que')]),
+                    _stream_chunk(tool_calls=[_tool_fragment(0, arguments='ry": "lamp"}')]),
+                    _usage_chunk(500, 20),
+                ]
+            ),
+            iter([_stream_chunk("The Desk Lamp is $39.00."), _usage_chunk(700, 30)]),
+        ]
+
+        _, events = self._post()
+
+        self.assertEqual(events[-1]["reply"], "The Desk Lamp is $39.00.")
+        second_call = create.call_args_list[1].kwargs["messages"]
+        tool_message = second_call[-1]
+        self.assertEqual(tool_message["role"], "tool")
+        self.assertEqual(tool_message["tool_call_id"], "call_1")
+        self.assertIn("Desk Lamp", tool_message["content"])
+        log = ChatLog.objects.get()
+        self.assertEqual(log.tool_calls, [{"name": "search_products", "arguments": '{"query": "lamp"}'}])
+        self.assertEqual(log.total_tokens, 1250)
+
+    @patch("agent.views.OpenAI")
+    def test_failure_mid_stream_sends_an_error_event_and_logs_it(self, mock_openai_cls):
+        def broken_stream():
+            yield _stream_chunk("Half an ans")
+            raise RuntimeError("connection reset")
+
+        mock_openai_cls.return_value.chat.completions.create.return_value = broken_stream()
+
+        _, events = self._post()
+
+        self.assertEqual(events[0], {"type": "delta", "text": "Half an ans"})
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertNotIn("connection reset", events[-1]["error"])
+        log = ChatLog.objects.get()
+        self.assertIn("connection reset", log.error)
+        self.assertEqual(log.reply, "")
+
+    def test_request_errors_come_back_as_json_before_streaming(self):
+        response, _ = self._post(message="   ")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.streaming)
+        self.assertEqual(response.json(), {"error": "Empty message"})
+        self.assertEqual(self.client.get(reverse("chat_stream_api")).status_code, 405)
+
+    @override_settings(CHAT_RATE_LIMIT_MAX=1)
+    @patch("agent.views.OpenAI")
+    def test_shares_the_rate_limit_with_the_plain_endpoint(self, mock_openai_cls):
+        mock_openai_cls.return_value.chat.completions.create.return_value = iter([_stream_chunk("Hi.")])
+        self._post()
+        response = self.client.post(
+            reverse("chat_api"), data=json.dumps({"message": "hello"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 429)
+
+
+@override_settings(OPENAI_API_KEY="test-key")
+@patch("agent.management.commands.run_chat_evals.DiscoverRunner")
+class RunChatEvalsStreamOptionTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    @patch("agent.views.OpenAI")
+    def test_stream_option_uses_the_streaming_endpoint(self, mock_openai_cls, _runner):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.return_value = iter(
+            [_stream_chunk("Sorry, a human will follow up.\n[ESC"), _stream_chunk("ALATE]")]
+        )
+        out = StringIO()
+        call_command("run_chat_evals", "--stream", "--scenario", "asks_for_human", stdout=out)
+        self.assertIn("PASS  asks_for_human", out.getvalue())
+        self.assertTrue(create.call_args.kwargs["stream"])

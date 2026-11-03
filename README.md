@@ -115,8 +115,10 @@ demand with tool calls instead of getting everything in every prompt.
     "End Call" button) becomes the visible UI. A "💬 View chat" button
     lets you peek at the text transcript mid-call without hanging up.
   - Both the mic input and Deskie's replies go through the exact same
-    `/api/chat/` endpoint as typed messages, so escalation and the
-    knowledge base behave identically either way.
+    chat endpoint as typed messages, so escalation and the knowledge base
+    behave identically either way. Voice replies are spoken once the whole
+    reply has streamed in (it finishes a fraction of a second after the
+    first sentence), so each turn still makes one `/api/tts/` call.
   - **Browser support varies** for the mic side: solid in Chrome/Edge,
     weak-to-absent in Firefox/Safari — the call button disables itself
     with an explanatory tooltip when unsupported, rather than failing
@@ -219,7 +221,16 @@ no template changes needed either way.
   `CHAT_HISTORY_MAX_TURNS` turns (default 10). Single messages are capped
   at `CHAT_MESSAGE_MAX_CHARS` (default 1000), and OpenAI calls time out
   after `OPENAI_TIMEOUT` seconds (default 30).
-- **Logging** — every `/api/chat/` call (success, escalation, or error) is
+- **Streaming replies** — the widget asks `/api/chat/stream/`, which
+  sends the reply as it's written (newline-delimited JSON events, see
+  `agent/streaming.py`). Tool lookups happen first; only the final reply
+  is streamed. The `[ESCALATE]` tag is held back on the server so it never
+  flashes on screen. If the stream can't start, the widget falls back to
+  `/api/chat/`, which returns the whole reply at once; both share the same
+  checks, rate limit and logging. Behind a proxy such as nginx, make sure
+  response buffering is off for that path (the response sets
+  `X-Accel-Buffering: no`, which nginx honors).
+- **Logging** — every chat call (success, escalation, or error) is
   recorded in a `ChatLog` row, visible read-only at `/admin/` under
   Agent > Chat logs.
 - **Cost and speed tracking** — each chat log also stores the model, token
@@ -279,7 +290,12 @@ model, for example before and after changing the system prompt or
 python manage.py run_chat_evals
 python manage.py run_chat_evals --scenario order_status_logged_in --show-replies
 python manage.py run_chat_evals --list
+python manage.py run_chat_evals --stream
 ```
+
+`--stream` sends the conversations through the streaming endpoint the
+widget uses, and also fails a scenario if the escalation tag ever shows
+up in the streamed text.
 
 Each scenario checks the reply with simple rules (does it escalate, does
 it mention or avoid certain words) and prints PASS or FAIL, with the reply
