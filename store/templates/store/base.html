@@ -7,6 +7,8 @@
   <meta name="description" content="Deskyard — considered desk and WFH gear for the setup you actually use every day.">
   <meta name="theme-color" content="#080808">
   <title>{% block title %}Deskyard{% endblock %}</title>
+  {# Lets the CSS hide content for entrance effects only when JS is there to show it again. #}
+  <script>document.documentElement.classList.add("js");</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="{% static 'store/store.css' %}">
@@ -53,6 +55,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   {% include "agent/chat_widget.html" %}
+  <script src="{% static 'store/effects.js' %}"></script>
   <script src="{% static 'agent/chat.js' %}"></script>
   <script src="{% static 'store/cart.js' %}"></script>
   <script src="{% static 'store/shop-filters.js' %}"></script>

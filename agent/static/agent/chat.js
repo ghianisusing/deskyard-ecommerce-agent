@@ -138,7 +138,11 @@ function addSuggestions() {
 }
 
 function removeSuggestions() {
-  document.getElementById("chat-suggestions")?.remove();
+  const el = document.getElementById("chat-suggestions");
+  if (!el) return;
+  el.removeAttribute("id"); // a quick second call shouldn't find it again
+  el.classList.add("is-leaving");
+  setTimeout(() => el.remove(), 150);
 }
 
 function openChat() {

@@ -55,6 +55,7 @@
       resultsEl.innerHTML = freshResults.innerHTML;
       resultsEl.setAttribute("aria-busy", "false");
       bindResultLinks(); // old listeners went away with the old DOM nodes
+      if (window.DeskyardFX) window.DeskyardFX.reveal(resultsEl); // new cards cascade in
       if (pushHistory) history.pushState({ shopFilters: true, scrollY }, "", url);
 
       // preventDefault() stops the browser from navigating, but it does

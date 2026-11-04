@@ -1433,9 +1433,242 @@ input[type=number]:focus-visible { outline: 2px dashed var(--yellow); outline-of
   .toast { bottom: 88px; }
 }
 
+/* ============================================================
+   MOTION
+   Snappy and graphic to match the type: hard offset shadows, quick
+   wipes and short rises, no soft floaty easing. Everything that hides
+   content before animating it in is scoped to html.js, so the page is
+   fully visible if scripts never run.
+   ============================================================ */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-snap: cubic-bezier(0.34, 1.56, 0.64, 1); /* slight overshoot */
+}
+
+html { scroll-behavior: smooth; }
+
+/* ---- Page-to-page transitions (browsers with cross-document View
+   Transitions; others just navigate normally). The nav and chat keep
+   still while the page content swaps underneath them. ---- */
+@view-transition { navigation: auto; }
+.nav { view-transition-name: site-nav; }
+#chat-widget { view-transition-name: chat-widget; }
+::view-transition-old(root) { animation: vt-out .18s var(--ease) both; }
+::view-transition-new(root) { animation: vt-in .32s var(--ease-out) both; }
+@keyframes vt-out { to { opacity: 0; transform: translateY(-8px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(12px); } }
+
+/* ---- Hero entrance ---- */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: none; }
+}
+.hero > * { animation: rise-in .7s var(--ease-out) both; }
+.hero > .eyebrow  { animation-delay: .05s; }
+.hero > h1        { animation-delay: .12s; }
+.hero > .hero-sub { animation-delay: .24s; }
+
+/* "leave." gets a yellow marker bar that wipes in under it */
+.hero h1 em { position: relative; display: inline-block; }
+.hero h1 em::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: .04em;
+  height: .09em;
+  background: var(--yellow);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: wipe-in .6s var(--ease-out) .65s forwards;
+}
+@keyframes wipe-in { to { transform: scaleX(1); } }
+
+.page-title, .eyebrow + .page-title { animation: rise-in .55s var(--ease-out) both; }
+
+/* ---- Scroll reveal (effects.js adds .is-visible, staggered by --i) ---- */
+html.js .reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity .5s var(--ease-out), transform .5s var(--ease-out);
+  transition-delay: calc(var(--i, 0) * 55ms);
+}
+html.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* ---- Product cards: lift onto a hard yellow shadow ---- */
+.product-card {
+  transition: background var(--t) var(--ease), transform .25s var(--ease-out), box-shadow .25s var(--ease-out);
+}
+html.js .product-card.reveal {
+  /* reveal and hover both move the card; keep both transitions */
+  transition: opacity .5s var(--ease-out), transform .5s var(--ease-out), background var(--t) var(--ease), box-shadow .25s var(--ease-out);
+}
+html.js .product-card.reveal.is-visible { transition-delay: calc(var(--i, 0) * 55ms), calc(var(--i, 0) * 55ms), 0s, 0s; }
+.product-card:hover,
+.product-card:focus-visible,
+html.js .product-card.reveal.is-visible:hover {
+  transform: translate(-5px, -5px);
+  box-shadow: 5px 5px 0 var(--yellow);
+  transition-delay: 0s;
+}
+.product-card:active,
+html.js .product-card.reveal.is-visible:active {
+  transform: translate(-2px, -2px);
+  box-shadow: 2px 2px 0 var(--yellow);
+}
+.product-card.is-sold-out:hover,
+html.js .product-card.is-sold-out.reveal.is-visible:hover { box-shadow: 5px 5px 0 var(--border-hover); }
+
+/* corner marks spread outward like a viewfinder locking on */
+.corner { transition: transform .3s var(--ease-out), border-color .3s var(--ease); }
+.product-card:hover .corner { border-color: rgba(0,0,0,.6); }
+.product-card:hover .corner.tl { transform: translate(-4px, -4px); }
+.product-card:hover .corner.tr { transform: translate(4px, -4px); }
+.product-card:hover .corner.bl { transform: translate(-4px, 4px); }
+.product-card:hover .corner.br { transform: translate(4px, 4px); }
+.product-card:hover .has-photo .corner { border-color: rgba(255,255,255,.7); }
+
+.product-visual.has-photo img { transition: transform .5s var(--ease-out), opacity .4s var(--ease); }
+.product-card:hover .product-visual.has-photo img { transform: scale(1.06); }
+
+/* price slides a touch when the card is hovered */
+.price-tag { display: inline-block; transition: transform .25s var(--ease-out); }
+.product-card:hover .price-tag { transform: translateX(3px); }
+
+/* images fade in once loaded instead of popping */
+html.js img.fade-img { opacity: 0; }
+html.js img.fade-img.is-loaded { opacity: 1; }
+
+/* ---- Nav: underline wipes in on hover, sits under the current page ---- */
+.nav-links a:not(.nav-cart)::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-top: 4px;
+  background: var(--yellow);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform .3s var(--ease-out);
+}
+.nav-links a:not(.nav-cart):hover::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+.nav-links a[aria-current="page"]:not(.nav-cart)::after { transform: scaleX(1); }
+.brand span { display: inline-block; transition: transform .3s var(--ease-snap), color var(--t) var(--ease); }
+.brand:hover span { transform: translateY(-3px) rotate(-3deg); }
+
+/* ---- Buttons: press down, hard shadow on hover ---- */
+button, input[type=submit], .btn {
+  transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+              transform .2s var(--ease-out), box-shadow .2s var(--ease-out);
+}
+button:not(:disabled):hover, input[type=submit]:hover, .btn:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 3px 3px 0 var(--yellow);
+}
+button:not(:disabled):active, input[type=submit]:active, .btn:active {
+  transform: translate(0, 0);
+  box-shadow: 0 0 0 var(--yellow);
+  transition-duration: .06s;
+}
+button.secondary:not(:disabled):hover { box-shadow: 3px 3px 0 var(--border-hover); }
+/* small utility buttons press but don't jump */
+.stepper .stepper-btn:hover, .remove-btn:hover, button.link-button:hover,
+.chat-input-row button:hover, .chat-suggestions button:hover,
+#chat-close:hover, #voice-toggle:hover, .deskie-floating-actions button:hover { box-shadow: none; transform: none; }
+.stepper .stepper-btn:active, .remove-btn:active { transform: scale(.88); box-shadow: none; }
+
+/* add-to-cart success state */
+.buy-btn.is-success,
+.buy-btn.is-success:hover {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: #000;
+  box-shadow: none;
+  transform: none;
+  animation: success-pop .45s var(--ease-snap);
+}
+@keyframes success-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.buy-btn.is-error { animation: shake .4s var(--ease); }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* ---- Chips ---- */
+.chip { transition: border-color var(--t) var(--ease), color var(--t) var(--ease), background var(--t) var(--ease), transform .2s var(--ease-snap); }
+.chip:hover { transform: translateY(-2px); }
+.chip:active { transform: scale(.94); }
+.chip.active { animation: chip-pop .35s var(--ease-snap); }
+@keyframes chip-pop { 0% { transform: scale(.9); } 100% { transform: scale(1); } }
+
+/* ---- Numbers that change in place (totals, subtotals, badge) ---- */
+.value-flash { animation: value-flash .6s var(--ease-out); }
+@keyframes value-flash {
+  0%   { color: #fff; transform: translateY(-4px); text-shadow: 0 0 18px rgba(255,229,0,.7); }
+  100% { transform: none; text-shadow: none; }
+}
+.cart-row .subtotal, .cart-summary .total span:last-child { display: inline-block; }
+.stepper input.tick-up   { animation: tick-up .25s var(--ease-out); }
+.stepper input.tick-down { animation: tick-down .25s var(--ease-out); }
+@keyframes tick-up   { from { transform: translateY(8px);  opacity: .3; } }
+@keyframes tick-down { from { transform: translateY(-8px); opacity: .3; } }
+
+/* ---- Cart rows collapse when removed ---- */
+.cart-row.is-removing,
+html.js .cart-row.reveal.is-visible.is-removing {
+  opacity: 0;
+  transform: translateX(24px);
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity .2s var(--ease), transform .25s var(--ease), height .3s var(--ease-out) .15s,
+              min-height .3s var(--ease-out) .15s;
+}
+
+/* ---- Toast slides out too ---- */
+.toast.is-leaving { animation: toast-out .25s var(--ease) forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translate(-50%, 16px); } }
+.toast::before {
+  content: "✓";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #000;
+  font-weight: 700;
+  animation: success-pop .45s var(--ease-snap) .1s both;
+}
+
+/* ---- Flash messages + inline errors ---- */
+.flash-message, .cart-error:not([hidden]) { animation: rise-in .4s var(--ease-out) both; }
+
+/* ---- Product page image ---- */
+.product-page .product-visual.has-photo img { transition: transform .6s var(--ease-out); }
+.product-page .product-visual.has-photo:hover img { transform: scale(1.04); }
+.product-page { animation: rise-in .5s var(--ease-out) both; }
+
+/* ---- Results swap after filtering ---- */
+#product-results .results-meta { transition: opacity var(--t) var(--ease); }
+#product-results[aria-busy="true"] .results-meta { opacity: .4; }
+
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  @view-transition { navigation: none; }
+  html.js .reveal, html.js img.fade-img { opacity: 1; transform: none; }
   *, *::before, *::after {
     animation-duration: .01ms !important;
+    animation-delay: 0s !important;
     transition-duration: .01ms !important;
+    transition-delay: 0s !important;
   }
 }

@@ -15,6 +15,15 @@ function getCookie(name) {
 const csrftoken = getCookie("csrftoken");
 const ajaxHeaders = { "X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrftoken };
 
+// Motion helpers from effects.js, with plain fallbacks if it didn't load.
+const fx = window.DeskyardFX || {
+  flash() {},
+  collapseAndRemove(el, done) {
+    if (el) el.remove();
+    if (done) done();
+  },
+};
+
 async function postForm(form) {
   const res = await fetch(form.action, { method: "POST", headers: ajaxHeaders, body: new FormData(form) });
   const data = await res.json().catch(() => ({}));
@@ -38,7 +47,12 @@ function updateCartBadge(count) {
 
 function setCartTotal(total) {
   const totalEl = document.getElementById("cart-total");
-  if (totalEl) totalEl.textContent = `$${total}`;
+  if (!totalEl) return;
+  const text = `$${total}`;
+  if (totalEl.textContent !== text) {
+    totalEl.textContent = text;
+    fx.flash(totalEl);
+  }
 }
 
 let toastTimer = null;
@@ -52,9 +66,16 @@ function showToast(message, link) {
     a.textContent = link.label;
     toast.appendChild(a);
   }
+  toast.classList.remove("is-leaving");
   toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.hidden = true; }, 4000);
+  toastTimer = setTimeout(() => {
+    toast.classList.add("is-leaving");
+    toastTimer = setTimeout(() => {
+      toast.hidden = true;
+      toast.classList.remove("is-leaving");
+    }, 250);
+  }, 4000);
 }
 
 function showCartError(message) {
@@ -107,7 +128,14 @@ document.querySelectorAll("[data-stepper]").forEach((stepper) => {
 
   stepper.querySelectorAll("[data-step]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      input.value = clampQuantity(input, clampQuantity(input) + Number(btn.dataset.step));
+      const before = clampQuantity(input);
+      const after = clampQuantity(input, before + Number(btn.dataset.step));
+      input.value = after;
+      if (after !== before) {
+        input.classList.remove("tick-up", "tick-down");
+        void input.offsetWidth; // restart the animation
+        input.classList.add(after > before ? "tick-up" : "tick-down");
+      }
       syncStepperButtons(stepper);
       scheduleSave();
     });
@@ -145,6 +173,7 @@ if (addForm) {
       const data = await postForm(addForm);
       updateCartBadge(data.cart_count);
       btn.textContent = "Added ✓";
+      btn.classList.add("is-success");
       if (statusEl) statusEl.textContent = `${data.line_quantity} in your cart.`;
       showToast(`${data.quantity_added} × ${data.product_name} added`, {
         href: document.getElementById("cart-link")?.href || "/cart/",
@@ -152,11 +181,13 @@ if (addForm) {
       });
     } catch (err) {
       btn.textContent = "Couldn't add — try again";
+      btn.classList.add("is-error");
       if (statusEl) statusEl.textContent = "";
     } finally {
       setTimeout(() => {
         btn.textContent = originalLabel;
         btn.disabled = false;
+        btn.classList.remove("is-success", "is-error");
       }, 1400);
     }
   });
@@ -177,7 +208,10 @@ document.querySelectorAll(".update-form").forEach((form) => {
       if (data.max_quantity > 0) input.max = data.max_quantity;
       syncStepperButtons(form.querySelector("[data-stepper]"));
       const subtotalEl = document.getElementById(`cart-subtotal-${form.dataset.productId}`);
-      if (subtotalEl) subtotalEl.textContent = `$${data.line_subtotal}`;
+      if (subtotalEl && subtotalEl.textContent !== `$${data.line_subtotal}`) {
+        subtotalEl.textContent = `$${data.line_subtotal}`;
+        fx.flash(subtotalEl);
+      }
       setCartTotal(data.total);
       updateCartBadge(data.cart_count);
     } catch (err) {
@@ -202,14 +236,14 @@ document.querySelectorAll(".remove-form").forEach((form) => {
       updateCartBadge(data.cart_count);
 
       if (data.cart_empty) {
-        showEmptyCart();
+        fx.collapseAndRemove(row, () => {
+          showEmptyCart();
+          if (window.DeskyardFX) window.DeskyardFX.reveal(document.getElementById("cart-container"));
+        });
         return;
       }
       setCartTotal(data.total);
-      if (row) {
-        row.classList.add("is-removing");
-        setTimeout(() => row.remove(), 250);
-      }
+      fx.collapseAndRemove(row);
     } catch (err) {
       btn.disabled = false;
       showCartError("Couldn't remove that item — please try again.");
