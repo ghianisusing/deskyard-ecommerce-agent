@@ -12,12 +12,14 @@
   padding: 14px 24px;
   border: none;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--blueprint, #3b82f6) 0%, var(--blueprint-dark, #1d4ed8) 100%);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+  background: var(--yellow, #FFE500);
+  color: #000;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
   cursor: pointer;
-  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 0 2px #000;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   align-items: center;
@@ -26,7 +28,9 @@
 
 #chat-toggle:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(59, 130, 246, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2);
+  background: var(--yellow, #FFE500);
+  color: #000;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6), 0 0 0 2px #000, 0 0 0 4px rgba(255, 229, 0, 0.35);
 }
 
 .chat-toggle-label {
@@ -36,13 +40,13 @@
 .chat-card {
   width: 350px;
   max-width: 90vw;
-  background: rgba(13, 19, 33, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  background: rgba(17, 17, 17, 0.97);
+  border: 2px solid var(--border, #272727);
+  border-radius: var(--radius-lg, 8px);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
-  height: 480px;
+  height: min(520px, calc(100vh - 120px));
   overflow: hidden;
   position: absolute;
   bottom: 72px;
@@ -87,7 +91,7 @@
 .chat-header-name {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--blueprint, #3b82f6);
+  color: var(--yellow, #FFE500);
 }
 
 #voice-toggle {
@@ -105,7 +109,7 @@
   white-space: nowrap;
 }
 #voice-toggle:hover {
-  border-color: var(--blueprint, #3b82f6);
+  border-color: var(--yellow, #FFE500);
   color: #fff;
 }
 #voice-toggle[aria-pressed="true"] {
@@ -120,12 +124,12 @@
 
 .voice-status {
   padding: 8px 16px;
-  background: rgba(59, 130, 246, 0.08);
+  background: rgba(255, 229, 0, 0.08);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.04em;
-  color: var(--blueprint, #3b82f6);
+  color: var(--yellow, #FFE500);
   text-align: center;
 }
 .voice-status.hidden { display: none; }
@@ -137,7 +141,7 @@
   cursor: pointer;
   color: var(--ink-muted);
   padding: 0;
-  transition: var(--transition-smooth);
+  transition: all 0.2s ease;
 }
 
 #chat-close:hover {
@@ -182,10 +186,10 @@
 
 .msg.user {
   align-self: flex-end;
-  background: var(--blueprint);
-  color: white;
-  border-bottom-right-radius: 4px;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+  background: var(--yellow, #FFE500);
+  color: #000;
+  font-weight: 500;
+  border-bottom-right-radius: 2px;
 }
 
 .msg.agent {
@@ -198,9 +202,9 @@
 
 .msg.system {
   align-self: center;
-  background: rgba(245, 158, 11, 0.15);
-  color: var(--amber);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(255, 229, 0, 0.15);
+  color: var(--yellow, #FFE500);
+  border: 1px solid rgba(255, 229, 0, 0.25);
   font-size: 11px;
   text-align: center;
   font-family: var(--font-mono, monospace);
@@ -243,33 +247,40 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   font-size: 13.5px;
-  background: rgba(9, 13, 22, 0.6);
+  background: var(--bg, #080808);
   color: #fff;
-  transition: var(--transition-smooth);
+  transition: all 0.2s ease;
 }
 
 #chat-input:focus {
   outline: none;
-  border-color: var(--blueprint);
-  background: rgba(9, 13, 22, 0.85);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  border-color: var(--yellow, #FFE500);
+  background: var(--bg, #080808);
+  box-shadow: 0 0 0 2px rgba(255, 229, 0, 0.25);
 }
 
 .chat-input-row button {
   padding: 10px 16px;
   border: none;
   border-radius: 10px;
-  background: var(--blueprint);
-  color: white;
+  background: var(--yellow, #FFE500);
+  color: #000;
   cursor: pointer;
-  font-size: 13.5px;
-  font-weight: 600;
-  transition: var(--transition-smooth);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
 }
 
 .chat-input-row button:hover {
-  background: var(--blueprint-dark);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  background: #fff;
+  color: #000;
+  transform: none;
+}
+.chat-input-row button:disabled {
+  background: var(--surface-2, #1c1c1c);
+  color: var(--ink-dim, #444);
 }
 
 /* ============================================================
@@ -319,8 +330,8 @@
 }
 
 @keyframes deskie-antenna-glow {
-  0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 0px var(--blueprint, #3b82f6)); }
-  50%      { opacity: 1;   filter: drop-shadow(0 0 4px var(--blueprint, #3b82f6)); }
+  0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 0px var(--yellow, #FFE500)); }
+  50%      { opacity: 1;   filter: drop-shadow(0 0 4px var(--yellow, #FFE500)); }
 }
 .deskie-antenna-tip {
   animation: deskie-antenna-glow 2.5s ease-in-out infinite;
@@ -346,8 +357,8 @@
 }
 
 @keyframes deskie-antenna-glow-fast {
-  0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 0px var(--blueprint, #3b82f6)); }
-  50%      { opacity: 1;   filter: drop-shadow(0 0 6px var(--blueprint, #3b82f6)); }
+  0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 0px var(--yellow, #FFE500)); }
+  50%      { opacity: 1;   filter: drop-shadow(0 0 6px var(--yellow, #FFE500)); }
 }
 .deskie[data-state="thinking"] .deskie-antenna-tip {
   animation: deskie-antenna-glow-fast 0.6s ease-in-out infinite;
@@ -442,8 +453,8 @@
   align-items: center;
   gap: 12px;
   padding: 26px 30px;
-  background: rgba(9, 13, 22, 0.94);
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(17, 17, 17, 0.96);
+  border: 1px solid rgba(255, 229, 0, 0.35);
   border-radius: 22px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(10px);
@@ -462,7 +473,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.04em;
-  color: var(--blueprint, #3b82f6);
+  color: var(--yellow, #FFE500);
   margin: 0;
   text-align: center;
   white-space: nowrap;
@@ -487,7 +498,7 @@
   white-space: nowrap;
 }
 #deskie-floating-transcript:hover {
-  border-color: var(--blueprint, #3b82f6);
+  border-color: var(--yellow, #FFE500);
   color: #fff;
 }
 #deskie-floating-end {
@@ -496,3 +507,87 @@
   color: #f87171;
 }
 #deskie-floating-end:hover { background: rgba(239, 68, 68, 0.28); }
+
+/* ============================================================
+   SUGGESTED QUESTIONS + TYPING INDICATOR
+   ============================================================ */
+.chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 38px; /* line up with the greeting bubble, past Deskie */
+  animation: messageFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.chat-suggestions button {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 229, 0, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--yellow, #FFE500);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .02em;
+  text-transform: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.chat-suggestions button:hover {
+  background: var(--yellow, #FFE500);
+  border-color: var(--yellow, #FFE500);
+  color: #000;
+  transform: none;
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 2px;
+}
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted, #888);
+  animation: typing-dot 1.1s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: .15s; }
+.typing-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30%           { opacity: 1;  transform: translateY(-3px); }
+}
+
+#chat-close {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 22px;
+  line-height: 1;
+}
+#chat-close:hover { background: rgba(255, 255, 255, 0.06); transform: none; }
+#chat-toggle:focus-visible,
+#chat-close:focus-visible,
+.chat-suggestions button:focus-visible { outline: 2px dashed var(--yellow, #FFE500); outline-offset: 3px; }
+
+/* Phones: the chat takes the whole screen instead of a cramped card. */
+@media (max-width: 640px) {
+  #chat-widget { bottom: 16px; right: 16px; }
+  #chat-toggle { padding: 12px 18px; }
+  .chat-card {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    height: 100dvh;
+    border: none;
+    border-radius: 0;
+    transform-origin: bottom center;
+  }
+  .chat-input-row { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  #chat-input { font-size: 16px; } /* stops iOS zooming in on focus */
+}

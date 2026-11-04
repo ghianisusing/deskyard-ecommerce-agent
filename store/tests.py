@@ -414,6 +414,51 @@ class CartAjaxTests(TestCase):
         self.assertRedirects(response, reverse("view_cart"))
 
 
+class CartUpdateQuantityTests(TestCase):
+    """The cart page's -/+ stepper sets a line to an exact quantity."""
+
+    def setUp(self):
+        self.product = Product.objects.create(name="Wireless Mouse", price=Decimal("20.00"), stock=5)
+        self.client.post(reverse("add_to_cart", args=[self.product.pk]), {"quantity": 2})
+
+    def _update(self, quantity, ajax=True):
+        headers = {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"} if ajax else {}
+        return self.client.post(reverse("update_cart", args=[self.product.pk]), {"quantity": quantity}, **headers)
+
+    def test_ajax_update_sets_exact_quantity_and_returns_totals(self):
+        data = self._update(3).json()
+        self.assertEqual(data["line_quantity"], 3)
+        self.assertEqual(data["line_subtotal"], "60.00")
+        self.assertEqual(data["total"], "60.00")
+        self.assertEqual(data["cart_count"], 3)
+        self.assertEqual(self.client.session["cart"], {str(self.product.pk): 3})
+
+    def test_quantity_is_capped_at_stock(self):
+        self.assertEqual(self._update(99).json()["line_quantity"], 5)
+
+    def test_quantity_never_drops_below_one(self):
+        self.assertEqual(self._update(0).json()["line_quantity"], 1)
+
+    def test_bad_quantity_keeps_current_value(self):
+        self.assertEqual(self._update("lots").json()["line_quantity"], 2)
+
+    def test_item_not_in_cart_is_rejected(self):
+        other = Product.objects.create(name="USB-C Hub", price=Decimal("15.00"), stock=5)
+        response = self.client.post(
+            reverse("update_cart", args=[other.pk]), {"quantity": 1}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(str(other.pk), self.client.session["cart"])
+
+    def test_without_ajax_header_redirects_to_cart(self):
+        self.assertRedirects(self._update(4, ajax=False), reverse("view_cart"))
+        self.assertEqual(self.client.session["cart"], {str(self.product.pk): 4})
+
+    def test_get_is_not_allowed(self):
+        response = self.client.get(reverse("update_cart", args=[self.product.pk]))
+        self.assertEqual(response.status_code, 405)
+
+
 class DeletedProductInCartTests(TestCase):
     """A product deleted in the admin used to 404 the cart page forever for
     anyone who had it in their session."""

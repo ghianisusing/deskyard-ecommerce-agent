@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Deskyard — considered desk and WFH gear for the setup you actually use every day.">
+  <meta name="theme-color" content="#080808">
   <title>{% block title %}Deskyard{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,33 +13,44 @@
   <link rel="stylesheet" href="{% static 'agent/chat.css' %}">
 </head>
 <body>
-  <nav class="nav">
-    <a href="{% url 'product_list' %}" class="brand">Deskyard</a>
+  <a href="#main" class="skip-link">Skip to content</a>
+  {% with current=request.resolver_match.url_name %}
+  <nav class="nav" aria-label="Main">
+    <a href="{% url 'product_list' %}" class="brand">Desk<span>yard</span></a>
     <div class="nav-links">
-      <a href="{% url 'view_cart' %}" id="cart-link">Cart<span class="cart-badge" id="cart-badge"{% if not cart_count %} style="display:none;"{% endif %}>{{ cart_count }}</span></a>
+      <a href="{% url 'product_list' %}" class="nav-shop"{% if current == 'product_list' or current == 'product_detail' %} aria-current="page"{% endif %}>Shop</a>
       {% if user.is_authenticated %}
-        <a href="{% url 'order_history' %}">My Orders</a>
+        <a href="{% url 'order_history' %}"{% if current == 'order_history' %} aria-current="page"{% endif %}>My Orders</a>
         <form action="{% url 'logout' %}" method="post" class="inline-form">
           {% csrf_token %}
           <button type="submit" class="link-button">Log out</button>
         </form>
       {% else %}
-        <a href="{% url 'login' %}">Log in</a>
-        <a href="{% url 'register' %}">Sign up</a>
+        <a href="{% url 'login' %}"{% if current == 'login' %} aria-current="page"{% endif %}>Log in</a>
+        <a href="{% url 'register' %}" class="nav-signup"{% if current == 'register' %} aria-current="page"{% endif %}>Sign up</a>
       {% endif %}
+      <a href="{% url 'view_cart' %}" id="cart-link" class="nav-cart"{% if current == 'view_cart' %} aria-current="page"{% endif %}>
+        Cart<span class="cart-badge" id="cart-badge" aria-label="{{ cart_count }} items"{% if not cart_count %} hidden{% endif %}>{{ cart_count }}</span>
+      </a>
     </div>
   </nav>
+  {% endwith %}
 
-  <main class="container">
+  <main class="container" id="main" tabindex="-1">
     {% if messages %}
       {% for message in messages %}
-        <p class="flash-message {{ message.tags }}">{{ message }}</p>
+        <p class="flash-message {{ message.tags }}" role="status">{{ message }}</p>
       {% endfor %}
     {% endif %}
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="site-footer">DESKYARD &mdash; GEAR FOR THE DESK YOU ACTUALLY USE &nbsp;|&nbsp; &copy; 2025</footer>
+  <footer class="site-footer">
+    <span class="footer-brand">Deskyard</span>
+    <span>Gear for the desk you actually use &nbsp;|&nbsp; &copy; {% now "Y" %}</span>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   {% include "agent/chat_widget.html" %}
   <script src="{% static 'agent/chat.js' %}"></script>

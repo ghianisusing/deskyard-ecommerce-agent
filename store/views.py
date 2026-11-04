@@ -115,6 +115,44 @@ def add_to_cart(request, pk):
 
 
 @require_POST
+def update_cart(request, pk):
+    """Set one cart line to an exact quantity (the cart page's -/+ stepper).
+    Quantities are kept between 1 and the product's current stock; use
+    remove_from_cart to drop a line entirely."""
+    cart = _get_cart(request)
+    if str(pk) not in cart:
+        if _is_ajax(request):
+            return JsonResponse({"ok": False, "error": "That item is no longer in your cart."}, status=404)
+        return redirect("view_cart")
+
+    product = get_object_or_404(Product, pk=pk)
+    try:
+        quantity = int(request.POST.get("quantity", cart[str(pk)]))
+    except (TypeError, ValueError):
+        quantity = cart[str(pk)]
+    quantity = max(quantity, 1)
+    if product.stock > 0:
+        quantity = min(quantity, product.stock)
+    cart[str(pk)] = quantity
+    request.session.modified = True
+
+    if _is_ajax(request):
+        lines = _cart_lines(request)
+        return JsonResponse(
+            {
+                "ok": True,
+                "cart_count": sum(cart.values()),
+                "product_id": pk,
+                "line_quantity": quantity,
+                "line_subtotal": str(product.price * quantity),
+                "max_quantity": product.stock,
+                "total": str(_cart_total(lines)),
+            }
+        )
+    return redirect("view_cart")
+
+
+@require_POST
 def remove_from_cart(request, pk):
     cart = _get_cart(request)
     cart.pop(str(pk), None)

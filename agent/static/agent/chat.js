@@ -95,9 +95,8 @@ function addMessage(text, cssClass, deskieState = null) {
 function addTypingIndicator() {
   const bubble = document.createElement("div");
   bubble.className = "msg agent";
-  bubble.textContent = "…";
-  bubble.style.opacity = "0.5";
-  bubble.style.fontStyle = "italic";
+  bubble.setAttribute("aria-label", "Deskie is typing");
+  bubble.innerHTML = '<span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>';
 
   const row = document.createElement("div");
   row.className = "msg-row agent-row";
@@ -111,11 +110,45 @@ function addTypingIndicator() {
   return row; // .remove() on this takes the avatar with it
 }
 
+// A few one-tap starter questions under the greeting, so customers who
+// don't know what Deskie can do have somewhere to begin. They disappear as
+// soon as the conversation starts.
+const SUGGESTED_QUESTIONS = [
+  "Where's my order?",
+  "What's your return policy?",
+  "Recommend a keyboard",
+];
+
+function addSuggestions() {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-suggestions";
+  wrap.id = "chat-suggestions";
+  SUGGESTED_QUESTIONS.forEach((question) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = question;
+    btn.addEventListener("click", () => {
+      if (isSending) return;
+      sendToAgent(question);
+    });
+    wrap.appendChild(btn);
+  });
+  messagesEl.appendChild(wrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function removeSuggestions() {
+  document.getElementById("chat-suggestions")?.remove();
+}
+
 function openChat() {
   panel.classList.remove("hidden");
   toggleBtn.setAttribute("aria-expanded", "true");
   if (!greeted) {
-    setTimeout(() => addMessage("Hi! How can I help you today?", "agent", "idle"), 200);
+    setTimeout(() => {
+      addMessage("Hi! How can I help you today?", "agent", "idle");
+      addSuggestions();
+    }, 200);
     greeted = true;
   }
   setTimeout(() => inputEl.focus(), 300);
@@ -225,6 +258,7 @@ async function sendToAgent(text, { speakReply = false } = {}) {
   const sendBtn = formEl.querySelector("button[type=submit]");
   sendBtn.disabled = true;
 
+  removeSuggestions();
   addMessage(text, "user");
 
   const typingEl = addTypingIndicator();
