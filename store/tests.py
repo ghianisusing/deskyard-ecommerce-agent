@@ -423,7 +423,9 @@ class CartUpdateQuantityTests(TestCase):
 
     def _update(self, quantity, ajax=True):
         headers = {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"} if ajax else {}
-        return self.client.post(reverse("update_cart", args=[self.product.pk]), {"quantity": quantity}, **headers)
+        return self.client.post(
+            reverse("update_cart", args=[self.product.pk]), {"quantity": quantity}, **headers
+        )
 
     def test_ajax_update_sets_exact_quantity_and_returns_totals(self):
         data = self._update(3).json()

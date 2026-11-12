@@ -9,6 +9,7 @@ not offered to guests at all.
 """
 
 import json
+import logging
 import re
 from collections.abc import Callable
 
@@ -17,6 +18,8 @@ from django.db.models import Q
 from store.models import Product
 
 from .models import KnowledgeBaseEntry
+
+logger = logging.getLogger(__name__)
 
 MAX_PRODUCT_RESULTS = 10
 MAX_ORDER_RESULTS = 5
@@ -181,6 +184,35 @@ HANDLERS: dict[str, Callable[..., dict]] = {
     "get_order": get_order,
 }
 
+SCHEMAS = {
+    schema["function"]["name"]: schema for schema in (SEARCH_PRODUCTS, GET_POLICIES, GET_MY_ORDERS, GET_ORDER)
+}
+
+# Python types accepted for each JSON schema type, and how to name the type
+# in an error. An integer may also arrive as text ("12" or "#12"); get_order
+# parses that itself.
+_ACCEPTED_TYPES = {"string": (str,), "integer": (int, str), "array": (list,)}
+_TYPE_NAMES = {"string": "a string", "integer": "an integer", "array": "a list"}
+
+
+def _argument_error(name: str, arguments: dict) -> str | None:
+    """Why these arguments don't fit the tool's schema, or None if they do.
+
+    The model usually follows the schema but nothing guarantees it, and a
+    handler given a list where it expects text would otherwise crash.
+    """
+    properties = SCHEMAS[name]["function"]["parameters"]["properties"]
+    for key, value in arguments.items():
+        spec = properties.get(key)
+        if spec is None:
+            return f"unknown argument '{key}'"
+        # bool is a subclass of int, so it needs ruling out by name.
+        if isinstance(value, bool) or not isinstance(value, _ACCEPTED_TYPES[spec["type"]]):
+            return f"'{key}' must be {_TYPE_NAMES[spec['type']]}"
+        if "enum" in spec and value not in spec["enum"]:
+            return f"'{key}' must be one of: {', '.join(spec['enum'])}"
+    return None
+
 
 def tools_for(user) -> list[dict]:
     """Tool definitions to offer for this customer. Guests get no order tools."""
@@ -195,6 +227,8 @@ def run_tool(user, name: str, raw_arguments: str) -> str:
 
     Bad input from the model (unknown tool, invalid JSON, wrong arguments)
     comes back as an error message it can read, rather than failing the chat.
+    So does a tool that breaks while running, which is also logged: the
+    model can then say it couldn't look that up instead of the reply dying.
     """
     offered = {tool["function"]["name"] for tool in tools_for(user)}
     if name not in offered:
@@ -205,8 +239,15 @@ def run_tool(user, name: str, raw_arguments: str) -> str:
         return json.dumps({"error": "Arguments were not valid JSON."})
     if not isinstance(arguments, dict):
         return json.dumps({"error": "Arguments must be a JSON object."})
+
+    # An optional argument sent as null or "" means the same as leaving it out.
+    arguments = {key: value for key, value in arguments.items() if value is not None and value != ""}
+    problem = _argument_error(name, arguments)
+    if problem:
+        return json.dumps({"error": f"Wrong arguments for {name}: {problem}."})
     try:
         result = HANDLERS[name](user, **arguments)
-    except TypeError:
-        return json.dumps({"error": f"Wrong arguments for {name}."})
+    except Exception:  # noqa: BLE001 - a broken tool must not break the chat
+        logger.exception("Tool %s failed with arguments %s", name, raw_arguments)
+        return json.dumps({"error": f"{name} isn't working right now."})
     return json.dumps(result)
