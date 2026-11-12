@@ -151,7 +151,9 @@ h1, h2, h3 {
   margin: 0 auto;
   padding: 48px 24px 96px;
   flex: 1;
+  width: 100%; /* body is a flex column; without this the page shrinks to its content */
 }
+.container:focus { outline: none; }
 
 /* ============================================================
    HERO
@@ -455,17 +457,22 @@ h1, h2, h3 {
    ============================================================ */
 .product-page {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
   border: 2px solid var(--border);
+  background: var(--surface);
 }
 
 @media (max-width: 768px) {
   .product-page { grid-template-columns: 1fr; }
+  .product-page .product-visual { border-right: none; border-bottom: 2px solid var(--border); min-height: 0; aspect-ratio: 4 / 3; }
 }
 
 .product-page .product-visual {
-  height: 360px;
+  height: auto;
+  min-height: 360px;
+  aspect-ratio: 1 / 1;
+  background: var(--yellow);
   border-right: 2px solid var(--border);
   border-radius: 0;
 }
@@ -869,7 +876,7 @@ form p {
   color: var(--ink-muted);
 }
 
-input[type=text], input[type=password], input[type=number], input[type=email] {
+input[type=text], input[type=password], input[type=number], input[type=email], input[type=search] {
   padding: 12px 14px;
   border: 2px solid var(--border);
   border-radius: var(--radius);
@@ -885,7 +892,10 @@ input:focus {
   border-color: var(--yellow);
 }
 
-button:focus { outline: 2px dashed var(--yellow); outline-offset: 3px; }
+button:focus { outline: none; }
+button:focus-visible,
+a:focus-visible,
+input[type=number]:focus-visible { outline: 2px dashed var(--yellow); outline-offset: 3px; opacity: 1; }
 
 .flash-message {
   padding: 14px 18px;
@@ -968,3 +978,697 @@ button:focus { outline: 2px dashed var(--yellow); outline-offset: 3px; }
 }
 .order-details dd { margin: 0; line-height: 1.5; }
 .order-details .muted { color: var(--ink-muted); }
+
+/* ============================================================
+   UX LAYER — shared pieces used across pages
+   ============================================================ */
+
+/* ---- Skip link (keyboard users jump past the nav) ---- */
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -60px;
+  z-index: 200;
+  padding: 10px 16px;
+  background: var(--yellow);
+  color: #000;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  border-radius: var(--radius);
+  transition: top var(--t) var(--ease);
+}
+.skip-link:focus { top: 12px; opacity: 1; }
+
+/* ---- Nav: current page + cart pill ---- */
+.nav-links a[aria-current="page"] { color: var(--ink); }
+.nav-links a[aria-current="page"]::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-top: 4px;
+  background: var(--yellow);
+}
+.nav-links a.nav-cart {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--t) var(--ease), color var(--t) var(--ease);
+}
+.nav-links a.nav-cart:hover,
+.nav-links a.nav-cart[aria-current="page"] { border-color: var(--yellow); }
+.nav-links a.nav-cart[aria-current="page"]::after { display: none; }
+.cart-badge[hidden] { display: none; }
+.cart-badge.bump { animation: badge-bump .45s var(--ease); }
+@keyframes badge-bump {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.45); }
+  100% { transform: scale(1); }
+}
+
+/* ---- Buttons as links ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 28px;
+  border: 2px solid var(--yellow);
+  border-radius: var(--radius);
+  background: var(--yellow);
+  color: #000;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease), transform var(--t) var(--ease);
+}
+.btn:hover { background: transparent; color: var(--yellow); opacity: 1; transform: translateY(-2px); }
+.btn-block { width: 100%; }
+.btn-sm { padding: 8px 14px; font-size: 12px; }
+
+.page-title {
+  font-size: clamp(36px, 5vw, 56px);
+  margin-bottom: 32px;
+}
+
+.action-row {
+  margin-top: 32px;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.action-row .back-link { margin-top: 0; }
+
+/* ---- Shop: search, result count, loading ---- */
+.search-field {
+  position: relative;
+  flex: 1;
+  max-width: 420px;
+}
+.search-field .search-input { width: 100%; padding-left: 42px; }
+.search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+.search-input::-webkit-search-cancel-button { filter: invert(1) grayscale(1); cursor: pointer; }
+
+.results-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin: -12px 0 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.results-meta strong { color: var(--ink); font-weight: 600; }
+
+#product-results .grid,
+#product-results .empty-state { transition: opacity var(--t) var(--ease); }
+#product-results[aria-busy="true"] .grid,
+#product-results[aria-busy="true"] .empty-state { opacity: .4; pointer-events: none; }
+
+.page-link-disabled {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  border: 2px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+}
+
+/* ---- Product cards ---- */
+.product-card:focus-visible { outline-offset: -4px; z-index: 3; }
+.product-info h3 { transition: color var(--t) var(--ease); }
+.product-card:hover .product-info h3 { color: var(--yellow); }
+.product-card.is-sold-out .product-visual { filter: grayscale(.85) brightness(.7); }
+.product-card.is-sold-out .price-tag { color: var(--ink-muted); }
+
+.badge.low-stock { background: rgba(255,65,54,.1); color: var(--coral); outline: 1px solid rgba(255,65,54,.3); }
+
+.empty-state p { margin: 0 0 24px; line-height: 1.6; }
+
+/* ---- Product detail ---- */
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.breadcrumb a { color: var(--ink-muted); }
+.breadcrumb a:hover { color: var(--yellow); opacity: 1; }
+.breadcrumb [aria-current] { color: var(--ink); }
+
+.product-detail-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.product-detail-body .page-title { margin-bottom: 12px; }
+.detail-price {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1;
+  color: var(--yellow);
+  margin: 0 0 16px;
+}
+.detail-description { margin-bottom: 8px; }
+
+.buy-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.buy-row .qty-row { margin-bottom: 0; flex-direction: column; align-items: flex-start; gap: 8px; }
+.buy-btn { flex: 1; min-width: 180px; height: 52px; }
+.cart-status a { color: var(--yellow); margin-left: 6px; }
+
+/* ---- Quantity stepper ---- */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  transition: border-color var(--t) var(--ease);
+}
+.stepper:focus-within { border-color: var(--yellow); }
+.stepper .stepper-btn {
+  width: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 18px;
+  letter-spacing: 0;
+}
+.stepper .stepper-btn:hover { background: var(--surface-2); color: var(--yellow); transform: none; }
+.stepper .stepper-btn:disabled { color: var(--ink-dim); background: transparent; }
+.stepper input[type=number] {
+  width: 56px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper-sm .stepper-btn { width: 32px; font-size: 15px; }
+.stepper-sm input[type=number] { width: 40px; height: 32px; font-size: 13px; }
+
+/* ---- Cart ---- */
+.cart-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 32px;
+  align-items: start;
+}
+.cart-count-line {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 0 0 12px;
+}
+.cart-row {
+  min-height: 112px;
+  transition: background var(--t) var(--ease), opacity .25s var(--ease), transform .25s var(--ease);
+}
+.cart-row.is-removing { opacity: 0; transform: translateX(16px); }
+.cart-row.is-busy { opacity: .6; }
+.cart-row .thumb { width: 112px; height: auto; align-self: stretch; }
+.cart-row .thumb:hover { opacity: 1; }
+.cart-row .info { padding: 16px 20px; }
+.cart-row .info .qty { margin: 6px 0 12px; }
+.cart-row .update-form { display: flex; gap: 8px; align-items: center; padding: 0; }
+.cart-row form.remove-form { padding-right: 16px; }
+.remove-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 2px solid var(--border);
+  color: var(--ink-muted);
+}
+.remove-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.remove-btn:hover { background: var(--rose-bg); border-color: var(--rose); color: var(--rose); transform: none; }
+.cart-error {
+  margin: 12px 0 0;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--rose);
+  background: var(--rose-bg);
+  border: 1px solid rgba(255,23,68,.25);
+  border-radius: var(--radius);
+}
+.cart-error[hidden] { display: none; }
+
+.cart-layout .cart-summary {
+  margin-left: 0;
+  border-top: 2px solid var(--border);
+  position: sticky;
+  top: 88px;
+}
+.summary-heading {
+  font-size: 28px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--border);
+}
+.cart-summary .total { margin-bottom: 24px; }
+.cart-summary form p.summary-note {
+  display: block;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-align: center;
+}
+.cart-summary form p { margin-bottom: 12px; }
+
+/* ---- Receipts & order history ---- */
+.receipt { border-color: rgba(0,200,83,.3); }
+.receipt-number {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  margin: 0 0 20px;
+  color: var(--ink-muted);
+}
+.receipt-number span { color: var(--ink); }
+
+.line-items {
+  list-style: none;
+  padding: 16px 0 0;
+  margin: 0 0 20px;
+  border-top: 1px solid var(--border);
+}
+.line-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+.line-items .item-name { color: var(--ink); font-weight: 500; }
+.line-items .item-price { font-family: var(--font-mono); color: var(--ink); white-space: nowrap; }
+.order-card { margin-bottom: 16px; }
+
+/* ---- Auth ---- */
+.auth-title { font-size: 40px; margin-bottom: 6px; }
+.auth-sub { color: var(--ink-muted); font-size: 14px; margin: 0 0 24px; line-height: 1.5; }
+.auth-switch { margin: 20px 0 0; font-size: 14px; color: var(--ink-muted); text-align: center; }
+.auth-card button[type=submit] { margin-top: 8px; }
+.auth-card input { width: 100%; }
+.helptext {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+/* Django puts the password rules <ul> inside a <p>; browsers move it out,
+   so it ends up as a direct child of the form. */
+.auth-card form ul:not(.errorlist) {
+  margin: -8px 0 16px;
+  padding-left: 18px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+.auth-card form ul.errorlist { padding-left: 0; }
+
+/* ---- Toast (add-to-cart confirmation) ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 2px solid var(--yellow);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  transform: translate(-50%, 0);
+  animation: toast-in .3s var(--ease);
+}
+.toast[hidden] { display: none; }
+.toast a { color: var(--yellow); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 900px) {
+  .cart-layout { grid-template-columns: 1fr; }
+  .cart-layout .cart-summary { position: static; }
+}
+
+@media (max-width: 640px) {
+  .nav { padding: 0 16px; height: 56px; }
+  .brand { font-size: 24px; }
+  .nav-links { gap: 16px; }
+  .nav-links .nav-shop, .nav-links .nav-signup { display: none; }
+  .nav-links a, .link-button { font-size: 12px; letter-spacing: .06em; }
+  .nav-links a.nav-cart { padding: 6px 10px; }
+
+  .container { padding: 28px 16px 120px; }
+  .hero { padding: 24px 0 32px; margin-bottom: 32px; }
+  .hero h1 { font-size: clamp(48px, 14vw, 64px); }
+
+  .search-field { max-width: none; }
+  .filter-bar button { padding: 12px 16px; }
+
+  /* chips scroll sideways instead of wrapping into a tall block */
+  .category-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin: 0 -16px 28px;
+    padding: 0 16px 4px;
+    scrollbar-width: none;
+  }
+  .category-chips::-webkit-scrollbar { display: none; }
+  .chip { white-space: nowrap; flex-shrink: 0; }
+
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-visual { height: 150px; }
+  .product-info { padding: 14px; }
+  .product-info h3 { font-size: 20px; }
+  .price-tag { font-size: 24px; }
+  .product-footer { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  .product-detail-body { padding: 24px 20px; }
+  .buy-btn { width: 100%; }
+
+  .cart-row { flex-wrap: wrap; position: relative; }
+  .cart-row .thumb { width: 88px; }
+  .cart-row .info { padding: 14px 52px 14px 14px; }
+  .cart-row .subtotal { width: 100%; text-align: left; padding: 0 14px 14px 102px; min-width: 0; margin-top: -8px; }
+  .cart-row form.remove-form { position: absolute; top: 12px; right: 12px; padding: 0; }
+
+  .receipt, .order-card, .auth-card { padding: 24px 20px; }
+  .auth-card { margin: 16px auto; }
+  .order-card-head { flex-wrap: wrap; gap: 8px; }
+
+  .site-footer { flex-direction: column; gap: 8px; text-align: center; padding: 24px 16px 96px; }
+  .toast { bottom: 88px; }
+}
+
+/* ============================================================
+   MOTION
+   Snappy and graphic to match the type: hard offset shadows, quick
+   wipes and short rises, no soft floaty easing. Everything that hides
+   content before animating it in is scoped to html.js, so the page is
+   fully visible if scripts never run.
+   ============================================================ */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-snap: cubic-bezier(0.34, 1.56, 0.64, 1); /* slight overshoot */
+}
+
+html { scroll-behavior: smooth; }
+
+/* ---- Page-to-page transitions (browsers with cross-document View
+   Transitions; others just navigate normally). The nav and chat keep
+   still while the page content swaps underneath them. ---- */
+@view-transition { navigation: auto; }
+.nav { view-transition-name: site-nav; }
+#chat-widget { view-transition-name: chat-widget; }
+::view-transition-old(root) { animation: vt-out .18s var(--ease) both; }
+::view-transition-new(root) { animation: vt-in .32s var(--ease-out) both; }
+@keyframes vt-out { to { opacity: 0; transform: translateY(-8px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(12px); } }
+
+/* ---- Hero entrance ---- */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: none; }
+}
+.hero > * { animation: rise-in .7s var(--ease-out) both; }
+.hero > .eyebrow  { animation-delay: .05s; }
+.hero > h1        { animation-delay: .12s; }
+.hero > .hero-sub { animation-delay: .24s; }
+
+/* "leave." gets a yellow marker bar that wipes in under it */
+.hero h1 em { position: relative; display: inline-block; }
+.hero h1 em::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: .04em;
+  height: .09em;
+  background: var(--yellow);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: wipe-in .6s var(--ease-out) .65s forwards;
+}
+@keyframes wipe-in { to { transform: scaleX(1); } }
+
+.page-title, .eyebrow + .page-title { animation: rise-in .55s var(--ease-out) both; }
+
+/* ---- Scroll reveal (effects.js adds .is-visible, staggered by --i) ---- */
+html.js .reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity .5s var(--ease-out), transform .5s var(--ease-out);
+  transition-delay: calc(var(--i, 0) * 55ms);
+}
+html.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* ---- Product cards: lift onto a hard yellow shadow ---- */
+.product-card {
+  transition: background var(--t) var(--ease), transform .25s var(--ease-out), box-shadow .25s var(--ease-out);
+}
+html.js .product-card.reveal {
+  /* reveal and hover both move the card; keep both transitions */
+  transition: opacity .5s var(--ease-out), transform .5s var(--ease-out), background var(--t) var(--ease), box-shadow .25s var(--ease-out);
+}
+html.js .product-card.reveal.is-visible { transition-delay: calc(var(--i, 0) * 55ms), calc(var(--i, 0) * 55ms), 0s, 0s; }
+.product-card:hover,
+.product-card:focus-visible,
+html.js .product-card.reveal.is-visible:hover {
+  transform: translate(-5px, -5px);
+  box-shadow: 5px 5px 0 var(--yellow);
+  transition-delay: 0s;
+}
+.product-card:active,
+html.js .product-card.reveal.is-visible:active {
+  transform: translate(-2px, -2px);
+  box-shadow: 2px 2px 0 var(--yellow);
+}
+.product-card.is-sold-out:hover,
+html.js .product-card.is-sold-out.reveal.is-visible:hover { box-shadow: 5px 5px 0 var(--border-hover); }
+
+/* corner marks spread outward like a viewfinder locking on */
+.corner { transition: transform .3s var(--ease-out), border-color .3s var(--ease); }
+.product-card:hover .corner { border-color: rgba(0,0,0,.6); }
+.product-card:hover .corner.tl { transform: translate(-4px, -4px); }
+.product-card:hover .corner.tr { transform: translate(4px, -4px); }
+.product-card:hover .corner.bl { transform: translate(-4px, 4px); }
+.product-card:hover .corner.br { transform: translate(4px, 4px); }
+.product-card:hover .has-photo .corner { border-color: rgba(255,255,255,.7); }
+
+.product-visual.has-photo img { transition: transform .5s var(--ease-out), opacity .4s var(--ease); }
+.product-card:hover .product-visual.has-photo img { transform: scale(1.06); }
+
+/* price slides a touch when the card is hovered */
+.price-tag { display: inline-block; transition: transform .25s var(--ease-out); }
+.product-card:hover .price-tag { transform: translateX(3px); }
+
+/* images fade in once loaded instead of popping */
+html.js img.fade-img { opacity: 0; }
+html.js img.fade-img.is-loaded { opacity: 1; }
+
+/* ---- Nav: underline wipes in on hover, sits under the current page ---- */
+.nav-links a:not(.nav-cart)::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-top: 4px;
+  background: var(--yellow);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform .3s var(--ease-out);
+}
+.nav-links a:not(.nav-cart):hover::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+.nav-links a[aria-current="page"]:not(.nav-cart)::after { transform: scaleX(1); }
+.brand span { display: inline-block; transition: transform .3s var(--ease-snap), color var(--t) var(--ease); }
+.brand:hover span { transform: translateY(-3px) rotate(-3deg); }
+
+/* ---- Buttons: press down, hard shadow on hover ---- */
+button, input[type=submit], .btn {
+  transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease),
+              transform .2s var(--ease-out), box-shadow .2s var(--ease-out);
+}
+button:not(:disabled):hover, input[type=submit]:hover, .btn:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 3px 3px 0 var(--yellow);
+}
+button:not(:disabled):active, input[type=submit]:active, .btn:active {
+  transform: translate(0, 0);
+  box-shadow: 0 0 0 var(--yellow);
+  transition-duration: .06s;
+}
+button.secondary:not(:disabled):hover { box-shadow: 3px 3px 0 var(--border-hover); }
+/* small utility buttons press but don't jump */
+.stepper .stepper-btn:hover, .remove-btn:hover, button.link-button:hover,
+.chat-input-row button:hover, .chat-suggestions button:hover,
+#chat-close:hover, #voice-toggle:hover, .deskie-floating-actions button:hover { box-shadow: none; transform: none; }
+.stepper .stepper-btn:active, .remove-btn:active { transform: scale(.88); box-shadow: none; }
+
+/* add-to-cart success state */
+.buy-btn.is-success,
+.buy-btn.is-success:hover {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: #000;
+  box-shadow: none;
+  transform: none;
+  animation: success-pop .45s var(--ease-snap);
+}
+@keyframes success-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.buy-btn.is-error { animation: shake .4s var(--ease); }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* ---- Chips ---- */
+.chip { transition: border-color var(--t) var(--ease), color var(--t) var(--ease), background var(--t) var(--ease), transform .2s var(--ease-snap); }
+.chip:hover { transform: translateY(-2px); }
+.chip:active { transform: scale(.94); }
+.chip.active { animation: chip-pop .35s var(--ease-snap); }
+@keyframes chip-pop { 0% { transform: scale(.9); } 100% { transform: scale(1); } }
+
+/* ---- Numbers that change in place (totals, subtotals, badge) ---- */
+.value-flash { animation: value-flash .6s var(--ease-out); }
+@keyframes value-flash {
+  0%   { color: #fff; transform: translateY(-4px); text-shadow: 0 0 18px rgba(255,229,0,.7); }
+  100% { transform: none; text-shadow: none; }
+}
+.cart-row .subtotal, .cart-summary .total span:last-child { display: inline-block; }
+.stepper input.tick-up   { animation: tick-up .25s var(--ease-out); }
+.stepper input.tick-down { animation: tick-down .25s var(--ease-out); }
+@keyframes tick-up   { from { transform: translateY(8px);  opacity: .3; } }
+@keyframes tick-down { from { transform: translateY(-8px); opacity: .3; } }
+
+/* ---- Cart rows collapse when removed ---- */
+.cart-row.is-removing,
+html.js .cart-row.reveal.is-visible.is-removing {
+  opacity: 0;
+  transform: translateX(24px);
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity .2s var(--ease), transform .25s var(--ease), height .3s var(--ease-out) .15s,
+              min-height .3s var(--ease-out) .15s;
+}
+
+/* ---- Toast slides out too ---- */
+.toast.is-leaving { animation: toast-out .25s var(--ease) forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translate(-50%, 16px); } }
+.toast::before {
+  content: "✓";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #000;
+  font-weight: 700;
+  animation: success-pop .45s var(--ease-snap) .1s both;
+}
+
+/* ---- Flash messages + inline errors ---- */
+.flash-message, .cart-error:not([hidden]) { animation: rise-in .4s var(--ease-out) both; }
+
+/* ---- Product page image ---- */
+.product-page .product-visual.has-photo img { transition: transform .6s var(--ease-out); }
+.product-page .product-visual.has-photo:hover img { transform: scale(1.04); }
+.product-page { animation: rise-in .5s var(--ease-out) both; }
+
+/* ---- Results swap after filtering ---- */
+#product-results .results-meta { transition: opacity var(--t) var(--ease); }
+#product-results[aria-busy="true"] .results-meta { opacity: .4; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  @view-transition { navigation: none; }
+  html.js .reveal, html.js img.fade-img { opacity: 1; transform: none; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-delay: 0s !important;
+    transition-duration: .01ms !important;
+    transition-delay: 0s !important;
+  }
+}

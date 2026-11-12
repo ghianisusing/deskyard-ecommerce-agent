@@ -17,7 +17,7 @@
 
   function bindResultLinks() {
     resultsEl
-      .querySelectorAll(".category-chips a, .pagination a, .clear-filters")
+      .querySelectorAll(".category-chips a, .pagination a, .clear-filters, .clear-filters-btn")
       .forEach((link) => {
         link.addEventListener("click", (e) => {
           e.preventDefault();
@@ -37,6 +37,9 @@
   }
 
   async function loadResults(url, { pushHistory = true, scrollY = window.scrollY } = {}) {
+    // Dim the current results while the next ones load, so a slow
+    // request still shows the click was registered.
+    resultsEl.setAttribute("aria-busy", "true");
     try {
       const res = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
@@ -50,7 +53,9 @@
       }
 
       resultsEl.innerHTML = freshResults.innerHTML;
+      resultsEl.setAttribute("aria-busy", "false");
       bindResultLinks(); // old listeners went away with the old DOM nodes
+      if (window.DeskyardFX) window.DeskyardFX.reveal(resultsEl); // new cards cascade in
       if (pushHistory) history.pushState({ shopFilters: true, scrollY }, "", url);
 
       // preventDefault() stops the browser from navigating, but it does
