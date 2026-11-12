@@ -138,7 +138,6 @@ class SyncNotificationsMixin:
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     SUPPORT_NOTIFICATION_EMAIL="support@example.com",
     DEFAULT_FROM_EMAIL="noreply@example.com",
-    SLACK_ESCALATION_WEBHOOK_URL="",
 )
 class EscalationEmailNotificationTests(SyncNotificationsMixin, TestCase):
     """Proves the signal in agent/signals.py actually sends mail — not just
@@ -178,41 +177,6 @@ class EscalationEmailNotificationTests(SyncNotificationsMixin, TestCase):
                 self.create_log(message="help", reply="on it", escalated=True)
             except RuntimeError:
                 self.fail("email failure in the signal handler must not propagate")
-
-
-@override_settings(
-    SUPPORT_NOTIFICATION_EMAIL="",
-    SLACK_ESCALATION_WEBHOOK_URL="https://hooks.slack.com/services/fake/webhook",
-)
-class EscalationSlackNotificationTests(SyncNotificationsMixin, TestCase):
-    @patch("agent.signals.httpx.post")
-    def test_creating_an_escalated_chatlog_posts_to_slack(self, mock_post):
-        mock_post.return_value = MagicMock(raise_for_status=MagicMock())
-        self.create_log(message="this is broken!!", reply="sorry about that", escalated=True)
-
-        mock_post.assert_called_once()
-        args, kwargs = mock_post.call_args
-        self.assertEqual(args[0], "https://hooks.slack.com/services/fake/webhook")
-        self.assertIn("this is broken!!", kwargs["json"]["text"])
-
-    @patch("agent.signals.httpx.post")
-    def test_non_escalated_chatlog_does_not_post_to_slack(self, mock_post):
-        self.create_log(message="hi", reply="hello!", escalated=False)
-        mock_post.assert_not_called()
-
-    @override_settings(SLACK_ESCALATION_WEBHOOK_URL="")
-    @patch("agent.signals.httpx.post")
-    def test_unconfigured_webhook_is_a_silent_no_op(self, mock_post):
-        self.create_log(message="ugh", reply="sorry", escalated=True)
-        mock_post.assert_not_called()
-
-    @patch("agent.signals.httpx.post", side_effect=RuntimeError("webhook unreachable"))
-    def test_a_broken_webhook_does_not_raise(self, mock_post):
-        with self.assertLogs("agent.signals", level="ERROR"):
-            try:
-                self.create_log(message="help", reply="on it", escalated=True)
-            except RuntimeError:
-                self.fail("Slack failure in the signal handler must not propagate")
 
 
 class DeskieWidgetRenderingTests(TestCase):
@@ -480,27 +444,23 @@ class OpenAiClientConfigTests(TestCase):
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     SUPPORT_NOTIFICATION_EMAIL="support@example.com",
-    SLACK_ESCALATION_WEBHOOK_URL="https://hooks.slack.com/services/fake/webhook",
 )
 class EscalationRunsOffTheRequestTests(TestCase):
     """Signals run inside the request, so delivery must be handed off
-    rather than done inline, or a slow webhook delays the customer's reply."""
+    rather than done inline, or a slow mail server delays the customer's reply."""
 
-    @patch("agent.signals.httpx.post")
     @patch("agent.signals._run_in_background")
-    def test_saving_does_not_send_anything_inline(self, mock_runner, mock_post):
+    def test_saving_does_not_send_anything_inline(self, mock_runner):
         with self.captureOnCommitCallbacks(execute=True):
             ChatLog.objects.create(message="help", reply="sorry", escalated=True)
 
         # Nothing was sent during the save; the work went to the background runner.
         self.assertEqual(len(mail.outbox), 0)
-        mock_post.assert_not_called()
         mock_runner.assert_called_once()
 
-        # Running the handed-off job is what actually delivers both alerts.
+        # Running the handed-off job is what actually sends the email.
         mock_runner.call_args.args[0]()
         self.assertEqual(len(mail.outbox), 1)
-        mock_post.assert_called_once()
 
     @patch("agent.signals._run_in_background")
     def test_nothing_is_scheduled_until_the_transaction_commits(self, mock_runner):
