@@ -181,9 +181,9 @@ OPENAI_INPUT_PRICE_PER_1M = Decimal(os.environ.get("OPENAI_INPUT_PRICE_PER_1M", 
 OPENAI_OUTPUT_PRICE_PER_1M = Decimal(os.environ.get("OPENAI_OUTPUT_PRICE_PER_1M", "0.60"))
 
 # --- Escalation notifications -------------------------------------------
-# When the agent flags a chat with [ESCALATE], agent/signals.py fires these
-# so a human actually finds out — not just a row in the admin nobody's
-# watching. Both are optional and independently no-op if left unset.
+# When the agent flags a chat with [ESCALATE], agent/signals.py emails
+# SUPPORT_NOTIFICATION_EMAIL so a human actually finds out — not just a row
+# in the admin nobody's watching. Optional; a no-op if left unset.
 
 # EMAIL_BACKEND defaults to printing to the console, which is fine for dev.
 # Set to "django.core.mail.backends.smtp.EmailBackend" (and the EMAIL_HOST*
@@ -200,9 +200,6 @@ EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 
 # Address that gets emailed on every escalation. Empty string = disabled.
 SUPPORT_NOTIFICATION_EMAIL = os.environ.get("SUPPORT_NOTIFICATION_EMAIL", "")
-
-# Slack incoming-webhook URL for escalation pings. Empty string = disabled.
-SLACK_ESCALATION_WEBHOOK_URL = os.environ.get("SLACK_ESCALATION_WEBHOOK_URL", "")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

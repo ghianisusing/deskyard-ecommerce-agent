@@ -70,7 +70,6 @@ class Command(BaseCommand):
         old_config = runner.setup_databases()
         try:
             with override_settings(
-                SLACK_ESCALATION_WEBHOOK_URL="",
                 SUPPORT_NOTIFICATION_EMAIL="",
                 CHAT_RATE_LIMIT_MAX=10_000,
             ):

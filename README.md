@@ -27,11 +27,10 @@ demand with tool calls instead of getting everything in every prompt.
    # then edit .env and paste in your OPENAI_API_KEY
    ```
 
-   Optional: to receive real notifications when the agent escalates a
-   chat, also set `SUPPORT_NOTIFICATION_EMAIL` and/or
-   `SLACK_ESCALATION_WEBHOOK_URL` in `.env`. Leave them blank and
-   escalation emails just print to your terminal (Django's console email
-   backend) — fine for local dev.
+   Optional: to receive an email when the agent escalates a chat, also
+   set `SUPPORT_NOTIFICATION_EMAIL` in `.env`. Until you configure a real
+   mail server, those emails just print to your terminal (Django's
+   console email backend) — fine for local dev.
 
 4. Run migrations (creates the database tables, plus a starter product
    catalog and knowledge base):
@@ -84,9 +83,8 @@ demand with tool calls instead of getting everything in every prompt.
   floating chat bubble, included on every store page via `store/base.html`.
 - Escalation: if the agent can't resolve something (or the customer asks
   for a human), it tags the reply, the widget shows a flag, and
-  `agent/signals.py` fires a real notification (email and/or Slack) to
-  whoever's configured to receive them — see "Escalation notifications"
-  below.
+  `agent/signals.py` emails whoever's configured to receive escalations —
+  see "Escalation notifications" below.
 - **Deskie** — the agent has a small hand-drawn SVG mascot
   (`agent/templates/agent/face.html`) with CSS-animated expressions
   (idle, listening, thinking, happy, concerned, speaking) driven by a
@@ -124,8 +122,8 @@ demand with tool calls instead of getting everything in every prompt.
     with an explanatory tooltip when unsupported, rather than failing
     silently.
   - This is a browser-side voice *chat*, not a real phone call —
-    "transfer to a human" still means the existing email/Slack
-    escalation notification, not a live person joining the call. A real
+    "transfer to a human" still means the existing escalation email,
+    not a live person joining the call. A real
     phone number would need a telephony provider (e.g. Twilio) and a
     paid account, which is a separate, much larger integration.
   - **Cost note**: `/api/tts/` shares the same per-user rate limiter as
@@ -207,15 +205,14 @@ no template changes needed either way.
   Postgres/MySQL. A DB-level `CheckConstraint` also guarantees `stock` can
   never go negative regardless of what the application code does.
 - **Escalation notifications** — when the agent flags a chat with
-  `[ESCALATE]`, `agent/signals.py` fires a real email and/or Slack
-  message the moment the `ChatLog` row is written, instead of that flag
-  only existing as a boolean nobody's watching in `/admin/`. Both are
-  optional and off by default — set `SUPPORT_NOTIFICATION_EMAIL` and/or
-  `SLACK_ESCALATION_WEBHOOK_URL` in `.env` to enable. Either channel
-  failing (bad SMTP config, dead webhook) is caught and logged — it can
-  never break the chat response the customer already received. Delivery
-  runs in a background thread after the database commit, so a slow mail
-  server or webhook never delays the customer's reply.
+  `[ESCALATE]`, `agent/signals.py` sends a real email the moment the
+  `ChatLog` row is written, instead of that flag only existing as a
+  boolean nobody's watching in `/admin/`. Optional and off by default —
+  set `SUPPORT_NOTIFICATION_EMAIL` in `.env` to enable. A failure to send
+  (bad SMTP config, server down) is caught and logged — it can never
+  break the chat response the customer already received. Delivery runs in
+  a background thread after the database commit, so a slow mail server
+  never delays the customer's reply.
 - **Cost control** — conversation history is kept server-side in the
   session (the browser can't send or forge it), capped to the last
   `CHAT_HISTORY_MAX_TURNS` turns (default 10). Single messages are capped
@@ -271,8 +268,7 @@ check, and the test suite on every pull request and every push to `main`.
 Covers: checkout stock validation (rejects overselling, doesn't
 partially apply on failure), a concurrency test proving two simultaneous
 checkouts can't both claim the last unit of stock, order total
-calculation, escalation tag parsing, escalation email/Slack notifications
-actually firing (and failing silently if misconfigured), chat rate
+calculation, escalation tag parsing, escalation emails actually firing (and failing silently if misconfigured), chat rate
 limiting, product search/category filtering/pagination, product image
 rendering (falls back to the SVG icon when unset, renders the real image
 when uploaded), Deskie/voice-call/floating-assistant markup rendering,
@@ -318,7 +314,7 @@ once is worth rerunning before you change anything. It's not part of CI.
   order — no payment is actually taken). The order's `payment_status` is
   where a payment provider's result should be recorded.
 - Escalations notify a human now, but there's still no ticket/queue to
-  work from — just an inbox or Slack channel. A `claimed_by` /
+  work from — just an inbox. A `claimed_by` /
   `resolved_at` field (or a small dedicated `EscalationTicket` model)
   plus a scoped `is_staff`-but-not-superuser support role would turn
   "someone got an email" into an actual workable queue.

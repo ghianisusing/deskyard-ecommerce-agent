@@ -3,43 +3,56 @@
 {% block content %}
 <section class="hero">
   <p class="eyebrow">Home office gear</p>
-  <h1>Build a desk you don't want to leave.</h1>
+  <h1>Build a desk you don't want to <em>leave.</em></h1>
   <p class="hero-sub">Considered gear for the setup you actually use every day — picked for how it feels, not just how it photographs.</p>
 </section>
 
-<div id="product-results">
-  <form class="filter-bar" method="get">
-    <input
-      type="text"
-      name="q"
-      value="{{ query }}"
-      placeholder="Search products…"
-      class="search-input"
-      aria-label="Search products"
-    >
+<div id="product-results" aria-busy="false">
+  <form class="filter-bar" method="get" role="search">
+    <div class="search-field">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input
+        type="search"
+        name="q"
+        value="{{ query }}"
+        placeholder="Search products…"
+        class="search-input"
+        aria-label="Search products"
+        autocomplete="off"
+      >
+    </div>
+    {% if selected_category %}<input type="hidden" name="category" value="{{ selected_category }}">{% endif %}
     <button type="submit">Search</button>
-    {% if query or selected_category %}
-      <a href="{% url 'product_list' %}" class="clear-filters">Clear</a>
-    {% endif %}
   </form>
 
-  <div class="category-chips">
-    <a href="{% url 'product_list' %}{% if query %}?q={{ query|urlencode }}{% endif %}"
-       class="chip {% if not selected_category %}active{% endif %}">All</a>
+  <div class="category-chips" role="list" aria-label="Categories">
+    <a href="{% url 'product_list' %}{% if query %}?q={{ query|urlencode }}{% endif %}" role="listitem"
+       class="chip {% if not selected_category %}active{% endif %}"{% if not selected_category %} aria-current="true"{% endif %}>All</a>
     {% for value, label in categories %}
-      <a href="?category={{ value }}{% if query %}&q={{ query|urlencode }}{% endif %}"
-         class="chip {% if selected_category == value %}active{% endif %}">{{ label }}</a>
+      <a href="?category={{ value }}{% if query %}&q={{ query|urlencode }}{% endif %}" role="listitem"
+         class="chip {% if selected_category == value %}active{% endif %}"{% if selected_category == value %} aria-current="true"{% endif %}>{{ label }}</a>
     {% endfor %}
   </div>
 
+  <div class="results-meta" aria-live="polite">
+    <span>
+      {{ page_obj.paginator.count }} product{{ page_obj.paginator.count|pluralize }}
+      {% if query %}for &ldquo;<strong>{{ query }}</strong>&rdquo;{% endif %}
+    </span>
+    {% if query or selected_category %}
+      <a href="{% url 'product_list' %}" class="clear-filters">&times; Clear filters</a>
+    {% endif %}
+  </div>
+
+  {% if products %}
   <div class="grid">
     {% for product in products %}
-      <a href="{% url 'product_detail' product.pk %}" class="product-card" style="text-decoration:none; color:inherit;">
+      <a href="{% url 'product_detail' product.pk %}" class="product-card{% if product.stock <= 0 %} is-sold-out{% endif %}">
         <div class="product-visual{% if product.image %} has-photo{% endif %}">
           <span class="corner tl"></span><span class="corner tr"></span>
           <span class="corner bl"></span><span class="corner br"></span>
           {% if product.image %}
-            <img src="{{ product.image.url }}" alt="{{ product.name }}">
+            <img src="{{ product.image.url }}" alt="" loading="lazy">
           {% else %}
             {% include "store/product_icon.html" with name=product.name %}
           {% endif %}
@@ -49,33 +62,43 @@
           <p class="sku">SKU-{{ product.pk|stringformat:"04d" }}</p>
           <div class="product-footer">
             <span class="price-tag">${{ product.price }}</span>
-            {% if product.stock > 0 %}
-              <span class="badge in-stock">In stock</span>
-            {% else %}
+            {% if product.stock <= 0 %}
               <span class="badge out-stock">Sold out</span>
+            {% elif product.stock <= 5 %}
+              <span class="badge low-stock">Only {{ product.stock }} left</span>
+            {% else %}
+              <span class="badge in-stock">In stock</span>
             {% endif %}
           </div>
         </div>
       </a>
-    {% empty %}
-      <p style="color: var(--ink-muted);">
-        {% if query or selected_category %}
-          No products match your filters.
-        {% else %}
-          No products yet.
-        {% endif %}
-      </p>
     {% endfor %}
   </div>
+  {% else %}
+    <div class="empty-state">
+      {% if query or selected_category %}
+        <h2>Nothing Matches</h2>
+        <p>No products match your filters. Try a different search, or browse every category.</p>
+        <a href="{% url 'product_list' %}" class="btn clear-filters-btn">Show all products</a>
+      {% else %}
+        <h2>No Products Yet</h2>
+        <p>Check back soon — new gear is on the way.</p>
+      {% endif %}
+    </div>
+  {% endif %}
 
   {% if page_obj.paginator.num_pages > 1 %}
     <nav class="pagination" aria-label="Product pages">
       {% if page_obj.has_previous %}
-        <a href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">← Prev</a>
+        <a href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" rel="prev">← Prev</a>
+      {% else %}
+        <span class="page-link-disabled" aria-hidden="true">← Prev</span>
       {% endif %}
       <span class="page-status">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
       {% if page_obj.has_next %}
-        <a href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Next →</a>
+        <a href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}" rel="next">Next →</a>
+      {% else %}
+        <span class="page-link-disabled" aria-hidden="true">Next →</span>
       {% endif %}
     </nav>
   {% endif %}

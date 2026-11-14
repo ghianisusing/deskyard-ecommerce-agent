@@ -1,29 +1,26 @@
 """Turns `ChatLog(escalated=True)` from a database row nobody's watching
-into an actual notification to a human.
+into an email to a human.
 
 Design choices:
 - Django signals run synchronously inside the request that saved the row,
-  so the handler itself does almost nothing: it builds the notification
-  text, then hands delivery to a background thread once the transaction
-  commits. The customer's reply is never delayed by a slow mail server or
-  Slack webhook. A task queue (Celery, RQ, etc.) is the sturdier option once
-  the project has one; a thread is enough until then, but a notification
-  in flight is lost if the process exits.
+  so the handler itself does almost nothing: it builds the email, then
+  hands delivery to a background thread once the transaction commits. The
+  customer's reply is never delayed by a slow mail server. A task queue
+  (Celery, RQ, etc.) is the sturdier option once the project has one; a
+  thread is enough until then, but an email in flight is lost if the
+  process exits.
 - The thread gets plain strings only, never model instances, so it never
   touches the database (and never leaks a DB connection).
-- Both notification paths are individually try/excepted and have timeouts.
-  A misconfigured SMTP server must never prevent a Slack ping from going
-  out.
-- Both are no-ops if unconfigured (no SUPPORT_NOTIFICATION_EMAIL /
-  SLACK_ESCALATION_WEBHOOK_URL), so this is safe to ship without forcing
-  every deployment to wire up email or Slack immediately.
+- Sending is try/excepted and has a timeout (EMAIL_TIMEOUT), so a
+  misconfigured SMTP server never breaks the chat.
+- It's a no-op if SUPPORT_NOTIFICATION_EMAIL is unset, so this is safe to
+  ship without forcing every deployment to wire up email immediately.
 """
 
 import logging
 import threading
 from collections.abc import Callable
 
-import httpx
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
@@ -33,8 +30,6 @@ from django.dispatch import receiver
 from .models import ChatLog
 
 logger = logging.getLogger(__name__)
-
-SLACK_TIMEOUT_SECONDS = 5.0
 
 
 @receiver(post_save, sender=ChatLog)
@@ -46,18 +41,11 @@ def notify_on_escalation(sender, instance: ChatLog, created: bool, **kwargs) -> 
         return
 
     email_job = _build_email_job(instance)
-    slack_job = _build_slack_job(instance)
-    if not email_job and not slack_job:
+    if not email_job:
         return
 
-    def deliver() -> None:
-        if email_job:
-            email_job()
-        if slack_job:
-            slack_job()
-
     # on_commit: don't notify about a row that might still be rolled back.
-    transaction.on_commit(lambda: _run_in_background(deliver))
+    transaction.on_commit(lambda: _run_in_background(email_job))
 
 
 def _run_in_background(fn: Callable[[], None]) -> None:
@@ -95,25 +83,5 @@ def _build_email_job(chat_log: ChatLog) -> Callable[[], None] | None:
             )
         except Exception:  # noqa: BLE001 - a broken mail server must never break the chat
             logger.exception("Failed to send escalation email for ChatLog #%s", pk)
-
-    return job
-
-
-def _build_slack_job(chat_log: ChatLog) -> Callable[[], None] | None:
-    webhook_url = settings.SLACK_ESCALATION_WEBHOOK_URL
-    if not webhook_url:
-        return None
-
-    pk = chat_log.pk
-    text = (
-        f":bell: *Chat escalated* — {_who(chat_log)}\n> {chat_log.message}\nAgent replied: {chat_log.reply}"
-    )
-
-    def job() -> None:
-        try:
-            response = httpx.post(webhook_url, json={"text": text}, timeout=SLACK_TIMEOUT_SECONDS)
-            response.raise_for_status()
-        except Exception:  # noqa: BLE001 - a broken webhook must never break the chat
-            logger.exception("Failed to send Slack escalation notice for ChatLog #%s", pk)
 
     return job

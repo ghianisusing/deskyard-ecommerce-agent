@@ -138,7 +138,6 @@ class SyncNotificationsMixin:
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     SUPPORT_NOTIFICATION_EMAIL="support@example.com",
     DEFAULT_FROM_EMAIL="noreply@example.com",
-    SLACK_ESCALATION_WEBHOOK_URL="",
 )
 class EscalationEmailNotificationTests(SyncNotificationsMixin, TestCase):
     """Proves the signal in agent/signals.py actually sends mail — not just
@@ -178,41 +177,6 @@ class EscalationEmailNotificationTests(SyncNotificationsMixin, TestCase):
                 self.create_log(message="help", reply="on it", escalated=True)
             except RuntimeError:
                 self.fail("email failure in the signal handler must not propagate")
-
-
-@override_settings(
-    SUPPORT_NOTIFICATION_EMAIL="",
-    SLACK_ESCALATION_WEBHOOK_URL="https://hooks.slack.com/services/fake/webhook",
-)
-class EscalationSlackNotificationTests(SyncNotificationsMixin, TestCase):
-    @patch("agent.signals.httpx.post")
-    def test_creating_an_escalated_chatlog_posts_to_slack(self, mock_post):
-        mock_post.return_value = MagicMock(raise_for_status=MagicMock())
-        self.create_log(message="this is broken!!", reply="sorry about that", escalated=True)
-
-        mock_post.assert_called_once()
-        args, kwargs = mock_post.call_args
-        self.assertEqual(args[0], "https://hooks.slack.com/services/fake/webhook")
-        self.assertIn("this is broken!!", kwargs["json"]["text"])
-
-    @patch("agent.signals.httpx.post")
-    def test_non_escalated_chatlog_does_not_post_to_slack(self, mock_post):
-        self.create_log(message="hi", reply="hello!", escalated=False)
-        mock_post.assert_not_called()
-
-    @override_settings(SLACK_ESCALATION_WEBHOOK_URL="")
-    @patch("agent.signals.httpx.post")
-    def test_unconfigured_webhook_is_a_silent_no_op(self, mock_post):
-        self.create_log(message="ugh", reply="sorry", escalated=True)
-        mock_post.assert_not_called()
-
-    @patch("agent.signals.httpx.post", side_effect=RuntimeError("webhook unreachable"))
-    def test_a_broken_webhook_does_not_raise(self, mock_post):
-        with self.assertLogs("agent.signals", level="ERROR"):
-            try:
-                self.create_log(message="help", reply="on it", escalated=True)
-            except RuntimeError:
-                self.fail("Slack failure in the signal handler must not propagate")
 
 
 class DeskieWidgetRenderingTests(TestCase):
@@ -480,27 +444,23 @@ class OpenAiClientConfigTests(TestCase):
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     SUPPORT_NOTIFICATION_EMAIL="support@example.com",
-    SLACK_ESCALATION_WEBHOOK_URL="https://hooks.slack.com/services/fake/webhook",
 )
 class EscalationRunsOffTheRequestTests(TestCase):
     """Signals run inside the request, so delivery must be handed off
-    rather than done inline, or a slow webhook delays the customer's reply."""
+    rather than done inline, or a slow mail server delays the customer's reply."""
 
-    @patch("agent.signals.httpx.post")
     @patch("agent.signals._run_in_background")
-    def test_saving_does_not_send_anything_inline(self, mock_runner, mock_post):
+    def test_saving_does_not_send_anything_inline(self, mock_runner):
         with self.captureOnCommitCallbacks(execute=True):
             ChatLog.objects.create(message="help", reply="sorry", escalated=True)
 
         # Nothing was sent during the save; the work went to the background runner.
         self.assertEqual(len(mail.outbox), 0)
-        mock_post.assert_not_called()
         mock_runner.assert_called_once()
 
-        # Running the handed-off job is what actually delivers both alerts.
+        # Running the handed-off job is what actually sends the email.
         mock_runner.call_args.args[0]()
         self.assertEqual(len(mail.outbox), 1)
-        mock_post.assert_called_once()
 
     @patch("agent.signals._run_in_background")
     def test_nothing_is_scheduled_until_the_transaction_commits(self, mock_runner):
@@ -940,6 +900,40 @@ class AgentToolTests(TestCase):
         self.assertIn("valid JSON", json.loads(run_tool(self.user, "search_products", "{not json"))["error"])
         self.assertIn("Wrong arguments", self._run("search_products", {"bogus": 1})["error"])
 
+    def test_wrongly_typed_arguments_return_errors_instead_of_raising(self):
+        # The model usually follows the tool schema, but nothing forces it to.
+        for arguments in ({"query": ["desk", "lamp"]}, {"query": 42}, {"query": True}):
+            self.assertIn("'query' must be a string", self._run("search_products", arguments)["error"])
+        self.assertIn("'topics' must be a list", self._run("get_policies", {"topics": "shipping"})["error"])
+        self.assertIn("'order_number' must be", self._run("get_order", {"order_number": [1]})["error"])
+        error = self._run("search_products", {"category": "furniture"})["error"]
+        self.assertIn("'category' must be one of", error)
+        self.assertIn("lighting", error)
+
+    def test_lenient_argument_forms_still_work(self):
+        # Optional arguments sent as null or "" count as left out.
+        result = self._run("search_products", {"query": "lamp", "category": ""})
+        self.assertEqual(result["products"][0]["name"], "Oak Desk Lamp")
+        self.assertEqual(len(self._run("search_products", {"query": None})["products"]), 2)
+        self.assertEqual(
+            self._run("get_policies", {"topics": None})["available_topics"], ["Returns", "Shipping"]
+        )
+        # An order number sent as text is still looked up.
+        found = self._run("get_order", {"order_number": f"#{self.order.pk}"})
+        self.assertEqual(found["order"]["order_number"], self.order.pk)
+
+    def test_a_tool_that_breaks_returns_an_error_and_is_logged(self):
+        with (
+            patch.dict(
+                "agent.tools.HANDLERS", {"search_products": MagicMock(side_effect=RuntimeError("boom"))}
+            ),
+            self.assertLogs("agent.tools", level="ERROR") as logs,
+        ):
+            result = self._run("search_products", {"query": "lamp"})
+        self.assertIn("isn't working", result["error"])
+        self.assertNotIn("boom", result["error"])
+        self.assertIn("boom", logs.output[0])
+
 
 def _mock_tool_call(call_id, name, arguments):
     call = MagicMock()
@@ -1264,6 +1258,72 @@ class ChatStreamApiTests(TestCase):
         log = ChatLog.objects.get()
         self.assertIn("connection reset", log.error)
         self.assertEqual(log.reply, "")
+
+    def _start_stream(self, client, **body):
+        """Post a message but leave the reply unread, as if it were still
+        streaming. Reading response.streaming_content finishes it."""
+        return client.post(
+            reverse("chat_stream_api"),
+            data=json.dumps({"message": "hello", **body}),
+            content_type="application/json",
+        )
+
+    @patch("agent.views.OpenAI")
+    def test_cart_changes_made_while_a_reply_streams_are_kept(self, mock_openai_cls):
+        create = mock_openai_cls.return_value.chat.completions.create
+        create.side_effect = [iter([_stream_chunk("First answer.")]), iter([_stream_chunk("Second answer.")])]
+        product = Product.objects.create(name="Desk Lamp", price=Decimal("39.00"), stock=4)
+        guest = Client()
+
+        response = self._start_stream(guest, message="first question", new_conversation=True)
+        guest.post(reverse("add_to_cart", args=[product.pk]), {"quantity": 2})
+        b"".join(response.streaming_content)
+
+        self.assertEqual(guest.session["cart"], {str(product.pk): 2})
+        # The history is still saved alongside the cart.
+        self._post(guest, message="second question")
+        sent = [m["content"] for m in create.call_args_list[1].kwargs["messages"]]
+        self.assertIn("First answer.", sent)
+
+    @patch("agent.views.OpenAI")
+    def test_checkout_while_a_reply_streams_does_not_bring_the_cart_back(self, mock_openai_cls):
+        mock_openai_cls.return_value.chat.completions.create.return_value = iter([_stream_chunk("Hi.")])
+        product = Product.objects.create(name="Desk Lamp", price=Decimal("39.00"), stock=4)
+        User.objects.create_user("tina", password="pw")
+        customer = Client()
+        customer.login(username="tina", password="pw")
+        customer.post(reverse("add_to_cart", args=[product.pk]), {"quantity": 1})
+
+        response = self._start_stream(customer)
+        address = {
+            "shipping_name": "Tina Doe",
+            "shipping_line1": "1 Main St",
+            "shipping_city": "Springfield",
+            "shipping_postal_code": "12345",
+            "shipping_country": "USA",
+        }
+        self.assertEqual(customer.post(reverse("checkout"), address).status_code, 200)
+        b"".join(response.streaming_content)
+
+        self.assertEqual(customer.session["cart"], {})
+        self.assertEqual(Order.objects.count(), 1)
+
+    @patch("agent.views.OpenAI")
+    def test_logging_out_while_a_reply_streams_still_finishes_and_logs_it(self, mock_openai_cls):
+        mock_openai_cls.return_value.chat.completions.create.return_value = iter([_stream_chunk("Hi there.")])
+        User.objects.create_user("tina", password="pw")
+        customer = Client()
+        customer.login(username="tina", password="pw")
+
+        response = self._start_stream(customer)
+        customer.post(reverse("logout"))
+        raw = b"".join(response.streaming_content).decode()
+
+        events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        self.assertEqual(events[-1], {"type": "done", "reply": "Hi there.", "escalate": False})
+        self.assertEqual(ChatLog.objects.get().reply, "Hi there.")
+        # The logged-out browser doesn't get the old conversation back.
+        self.assertNotIn("chat_history", customer.session)
 
     def test_request_errors_come_back_as_json_before_streaming(self):
         response, _ = self._post(message="   ")

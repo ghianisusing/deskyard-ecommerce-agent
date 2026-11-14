@@ -6,6 +6,7 @@ from time import monotonic
 from types import SimpleNamespace
 
 from django.conf import settings
+from django.contrib.sessions.backends.base import UpdateError
 from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from openai import OpenAI
@@ -314,12 +315,38 @@ def _prepare_chat(request):
     }
 
 
-def _remember_turn(request, chat: dict, reply_text: str) -> None:
+def _history_with_turn(chat: dict, reply_text: str) -> list:
     history = chat["history"] + [
         {"role": "user", "content": chat["message"]},
         {"role": "assistant", "content": reply_text},
     ]
-    request.session[CHAT_HISTORY_SESSION_KEY] = history[-chat["max_entries"] :]
+    return history[-chat["max_entries"] :]
+
+
+def _remember_turn(request, chat: dict, reply_text: str) -> None:
+    request.session[CHAT_HISTORY_SESSION_KEY] = _history_with_turn(chat, reply_text)
+
+
+def _remember_turn_after_stream(request, chat: dict, reply_text: str) -> None:
+    """Save the turn once a streamed reply has finished.
+
+    A reply streams for seconds, and by the end request.session is an old
+    copy: saving it would undo anything another request changed meanwhile,
+    such as adding to the cart or checking out. So the session is read
+    again and only the chat history is written to it.
+
+    If the session is gone (the customer logged out, or logged in and got
+    a new one, while the reply streamed) there is nothing to remember.
+    """
+    session_key = request.session.session_key
+    store = type(request.session)(session_key)
+    if not session_key or not store.exists(session_key):
+        return
+    store[CHAT_HISTORY_SESSION_KEY] = _history_with_turn(chat, reply_text)
+    try:
+        store.save()
+    except UpdateError:
+        pass  # deleted between the check and the save; same as above
 
 
 def _log_failure(request, chat: dict, started: float, error: str, responses: list, tool_calls: list) -> None:
@@ -463,7 +490,8 @@ def chat_stream_api(request):
 
     # The session middleware saves the session and sets its cookie before
     # the stream runs, so a brand-new session needs its key now; the
-    # stream then saves the updated history itself.
+    # stream then saves the updated history itself (see
+    # _remember_turn_after_stream).
     if not request.session.session_key:
         request.session.save()
     request.session.modified = True
@@ -500,8 +528,7 @@ def chat_stream_api(request):
 
         latency_ms = round((monotonic() - started) * 1000)
         reply_text, escalate = parse_agent_reply(state.reply)
-        _remember_turn(request, chat, reply_text)
-        request.session.save()
+        _remember_turn_after_stream(request, chat, reply_text)
         _log_chat(
             request,
             chat["message"],
